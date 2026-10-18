@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>ShutterPaid</title>
+  <meta name="theme-color" content="#0f1020">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="ShutterPaid">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body class="app-body">
+  <header class="site-header">
+    <div class="container">
+      <a class="brand" href="index.html"><img src="icons/icon.svg" alt="">ShutterPaid</a>
+      <div class="nav-links">
+        <button class="btn btn-sm btn-ghost" id="installBtn" hidden>Install</button>
+        <button class="btn btn-sm btn-primary" data-action="new-invoice">+ New invoice</button>
+      </div>
+    </div>
+  </header>
+
+  <nav class="tabbar" aria-label="App sections">
+    <button data-view="dashboard" class="active"><span class="ti">🏠</span>Dashboard</button>
+    <button data-view="invoices"><span class="ti">🧾</span>Invoices</button>
+    <button data-view="settings"><span class="ti">⚙️</span>Settings</button>
+  </nav>
+
+  <main class="app-main container">
+    <!-- Dashboard -->
+    <section class="view" id="view-dashboard">
+      <h1 id="greeting">Welcome back 👋</h1>
+      <p class="sub">Here's who needs a nudge today.</p>
+
+      <div class="stats">
+        <div class="stat accent"><div class="label">Outstanding</div><div class="value" id="statOutstanding">$0</div></div>
+        <div class="stat"><div class="label">Overdue</div><div class="value" id="statOverdue">$0</div></div>
+        <div class="stat"><div class="label">Due in 7 days</div><div class="value" id="statSoon">$0</div></div>
+        <div class="stat"><div class="label">Paid this month</div><div class="value" id="statPaid">$0</div></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h2>⏰ Needs a reminder</h2></div>
+        <ul class="list" id="reminderList"></ul>
+      </div>
+    </section>
+
+    <!-- Invoices -->
+    <section class="view" id="view-invoices" hidden>
+      <h1>Invoices</h1>
+      <p class="sub">Every shoot, every payment.</p>
+      <div class="toolbar" id="filterBar">
+        <button class="chip active" data-filter="all">All</button>
+        <button class="chip" data-filter="unpaid">Unpaid</button>
+        <button class="chip" data-filter="overdue">Overdue</button>
+        <button class="chip" data-filter="paid">Paid</button>
+      </div>
+      <input type="search" id="searchInput" placeholder="Search by client, shoot or invoice #" style="margin-bottom:16px">
+      <div class="panel">
+        <ul class="list" id="invoiceList"></ul>
+      </div>
+    </section>
+
+    <!-- Settings -->
+    <section class="view" id="view-settings" hidden>
+      <h1>Settings</h1>
+      <p class="sub">These details appear in your reminder emails.</p>
+      <div class="panel" style="padding:20px">
+        <form class="form" id="settingsForm">
+          <div class="form-row">
+            <label>Your name<input name="ownerName" placeholder="Alex Rivera"></label>
+            <label>Business name<input name="businessName" placeholder="Rivera Photography"></label>
+          </div>
+          <div class="form-row">
+            <label>Default currency
+              <select name="currency">
+                <option value="USD">USD $</option>
+                <option value="EUR">EUR €</option>
+                <option value="GBP">GBP £</option>
+                <option value="INR">INR ₹</option>
+                <option value="AUD">AUD $</option>
+                <option value="CAD">CAD $</option>
+              </select>
+            </label>
+            <label>Remind me this many days before the due date<input name="soonDays" type="number" min="0" max="30" value="3"></label>
+          </div>
+          <label>Payment link <span class="hint">PayPal, Stripe, a bank transfer page, or anything clients can use to pay</span>
+            <input name="paymentLink" type="url" placeholder="https://paypal.me/yourname">
+          </label>
+          <label>Email signature<textarea name="signature" placeholder="Alex Rivera&#10;Rivera Photography · riveraphoto.com"></textarea></label>
+          <div class="dialog-actions" style="justify-content:flex-start">
+            <button class="btn btn-primary" type="submit">Save settings</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="panel" style="padding:20px">
+        <h2 style="margin:0 0 6px;font-size:1.05rem">💾 Backup</h2>
+        <p class="sub" style="margin-bottom:16px">Your data is stored only on this device. Export a backup to keep it safe or move it to another device.</p>
+        <div class="toolbar">
+          <button class="btn btn-sm" id="exportBtn">Export backup</button>
+          <label class="btn btn-sm" style="display:inline-flex">Import backup<input type="file" id="importInput" accept="application/json" hidden></label>
+          <button class="btn btn-sm" id="demoBtn">Load sample data</button>
+          <button class="btn btn-sm btn-danger" id="resetBtn">Erase all data</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Invoice dialog -->
+  <dialog id="invoiceDialog">
+    <form method="dialog" class="dialog-inner form" id="invoiceForm">
+      <h2 id="invoiceDialogTitle">New invoice</h2>
+      <input type="hidden" name="id">
+      <div class="form-row">
+        <label>Client name<input name="clientName" required placeholder="Priya &amp; Sam"></label>
+        <label>Client email<input name="clientEmail" type="email" placeholder="client@email.com"></label>
+      </div>
+      <div class="form-row">
+        <label>Shoot type
+          <select name="shootType">
+            <option>Wedding</option><option>Engagement</option><option>Portrait</option><option>Family</option>
+            <option>Newborn</option><option>Event</option><option>Product</option><option>Commercial</option>
+            <option>Real estate</option><option>Other</option>
+          </select>
+        </label>
+        <label>Invoice #<input name="number" placeholder="INV-1001"></label>
+      </div>
+      <div class="form-row">
+        <label>Amount<input name="amount" type="number" min="0" step="0.01" required placeholder="1200"></label>
+        <label>Currency
+          <select name="currency">
+            <option value="USD">USD $</option><option value="EUR">EUR €</option><option value="GBP">GBP £</option>
+            <option value="INR">INR ₹</option><option value="AUD">AUD $</option><option value="CAD">CAD $</option>
+          </select>
+        </label>
+      </div>
+      <div class="form-row">
+        <label>Shoot date<input name="shootDate" type="date"></label>
+        <label>Due date<input name="dueDate" type="date" required></label>
+      </div>
+      <label>Notes<textarea name="notes" placeholder="Deposit received, final gallery delivered on…"></textarea></label>
+      <div class="dialog-actions">
+        <button class="btn btn-ghost" value="cancel" formnovalidate>Cancel</button>
+        <button class="btn btn-primary" value="save" id="saveInvoiceBtn">Save invoice</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Reminder dialog -->
+  <dialog id="reminderDialog">
+    <div class="dialog-inner">
+      <h2>Send a reminder</h2>
+      <div class="tone-picker" id="tonePicker">
+        <button class="chip active" data-tone="friendly">😊 Friendly</button>
+        <button class="chip" data-tone="firm">📌 Firm</button>
+        <button class="chip" data-tone="final">⚠️ Final notice</button>
+      </div>
+      <div class="form">
+        <label>Subject<input id="reminderSubject"></label>
+        <label>Message<textarea id="reminderBody" rows="10"></textarea></label>
+      </div>
+      <div class="dialog-actions">
+        <button class="btn btn-ghost" id="reminderCancel">Close</button>
+        <button class="btn" id="reminderCopy">Copy text</button>
+        <button class="btn btn-primary" id="reminderSend">Open in email</button>
+      </div>
+    </div>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="js/pwa.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

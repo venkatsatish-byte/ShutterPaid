@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>ShutterPaid — Invoice reminders for photographers</title>
+  <meta name="description" content="ShutterPaid tracks your photography invoices and sends friendly payment reminders so you can focus on shooting, not chasing.">
+  <meta name="theme-color" content="#0f1020">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <a class="brand" href="./"><img src="icons/icon.svg" alt="">ShutterPaid</a>
+      <nav class="nav-links">
+        <a href="#features">Features</a>
+        <a href="#how">How it works</a>
+        <button class="btn btn-sm btn-ghost" id="installBtn" hidden>Install app</button>
+        <a class="btn btn-sm btn-primary" href="app.html">Open app</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="container">
+        <span class="eyebrow">📸 Made for photographers</span>
+        <h1>You captured the moment.<br><span class="grad-text">Now capture the payment.</span></h1>
+        <p class="lead">ShutterPaid keeps track of every invoice from every shoot and tells you exactly who to nudge and when. Your reminders sound polite and professional, and they're ready in one tap.</p>
+        <div class="hero-cta">
+          <a class="btn btn-primary" href="app.html">Start for free →</a>
+          <a class="btn" href="#how">See how it works</a>
+        </div>
+
+        <div class="mockup" aria-hidden="true">
+          <div class="mockup-row">
+            <div><strong>Priya &amp; Sam — Wedding</strong><small>Due 3 days ago</small></div>
+            <div><span class="badge badge-danger">Overdue</span> <strong>$2,400</strong></div>
+          </div>
+          <div class="mockup-row">
+            <div><strong>Bloom Studio — Product shoot</strong><small>Due tomorrow</small></div>
+            <div><span class="badge badge-warn">Due soon</span> <strong>$850</strong></div>
+          </div>
+          <div class="mockup-row">
+            <div><strong>The Garcia Family — Portraits</strong><small>Paid last week</small></div>
+            <div><span class="badge badge-ok">Paid</span> <strong>$320</strong></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="features">
+      <div class="container">
+        <div class="section-title">
+          <h2>Everything you need to <span class="grad-text">get paid</span></h2>
+          <p>No spreadsheets, no awkward follow-ups.</p>
+        </div>
+        <div class="grid grid-3">
+          <div class="feature"><div class="icon">🧾</div><h3>Track every invoice</h3><p>Weddings, portraits, events and brand work, each with its client, shoot date, amount and due date.</p></div>
+          <div class="feature"><div class="icon">⏰</div><h3>Smart reminders</h3><p>See which invoices are overdue or due soon, and who needs a nudge today.</p></div>
+          <div class="feature"><div class="icon">✉️</div><h3>One-tap emails</h3><p>Choose a friendly, firm or final tone. ShutterPaid fills in the email with your payment link.</p></div>
+          <div class="feature"><div class="icon">📊</div><h3>Cash-flow at a glance</h3><p>Outstanding, overdue and paid-this-month totals right on your dashboard.</p></div>
+          <div class="feature"><div class="icon">📱</div><h3>Works like an app</h3><p>Install it on your phone or desktop. It even works offline between shoots.</p></div>
+          <div class="feature"><div class="icon">🔒</div><h3>Private by design</h3><p>Your data stays on your device. Export a backup whenever you like.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="how">
+      <div class="container">
+        <div class="section-title">
+          <h2>How it works</h2>
+          <p>Three steps from shoot to paid.</p>
+        </div>
+        <div class="grid grid-3 steps">
+          <div class="step"><h3>Add the invoice</h3><p>Log the client, the shoot, the amount and the due date in under 30 seconds.</p></div>
+          <div class="step"><h3>Get nudged</h3><p>Your dashboard shows which clients need a reminder today.</p></div>
+          <div class="step"><h3>Send &amp; get paid</h3><p>Send a reminder in one tap and mark the invoice paid when the money arrives.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="container">
+        <div class="cta-band">
+          <h2>Shoot. Send. Get paid.</h2>
+          <p>Focus on your art and let ShutterPaid chase the invoices.</p>
+          <a class="btn" href="app.html">Open ShutterPaid</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">© <span id="year"></span> ShutterPaid. Built for photographers.</div>
+  </footer>
+
+  <script src="js/pwa.js"></script>
+  <script>document.getElementById('year').textContent = new Date().getFullYear();</script>
+</body>
+</html>

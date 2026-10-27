@@ -326,6 +326,53 @@
     return /^PGRST3/.test(err.code) || err.code === '57014' || err.code === '503';
   }
 
+  // FREE_PLAN_LIMIT / PRO_REQUIRED raised by the database (see the plans migration), or null.
+  function planLimitError(err) {
+    const m = err && /\b(FREE_PLAN_LIMIT|PRO_REQUIRED)\b/.exec(String(err.message || ''));
+    return m ? m[1] : null;
+  }
+
+  // ---------- Plans ----------
+  const FREE_ACTIVE_LIMIT = 5;
+
+  function planFromProfile(p) {
+    if (!p) return null;
+    return {
+      plan: p.plan === 'pro' ? 'pro' : 'free',
+      status: p.plan_status || '',
+      interval: p.plan_interval || '',
+      periodEnd: p.current_period_end || '',
+      trialEndsAt: p.trial_ends_at || '',
+      cancelAtPeriodEnd: !!p.cancel_at_period_end,
+      trialUsed: !!p.trial_used,
+      hasBilling: !!p.stripe_customer_id
+    };
+  }
+
+  // Mirrors public.is_pro(): Pro, and the paid period hasn't ended more than 3 days ago.
+  function isPro(plan, now) {
+    if (!plan || plan.plan !== 'pro') return false;
+    if (!plan.periodEnd) return true;
+    return Date.parse(plan.periodEnd) > (now || Date.now()) - 3 * DAY;
+  }
+
+  function activeCount(invoices) {
+    return invoices.filter((i) => !i.paid).length;
+  }
+
+  // Split invoices to upload into what fits on the Free plan and what has to wait: paid invoices
+  // always fit; unpaid ones fill the remaining active slots, soonest due first.
+  function fitToPlan(invoices, activeNow, limit) {
+    let room = Math.max(0, limit - activeNow);
+    const fits = [];
+    const left = [];
+    invoices.filter((i) => i.paid).forEach((i) => fits.push(i));
+    invoices.filter((i) => !i.paid)
+      .sort((a, b) => String(a.dueDate).localeCompare(String(b.dueDate)))
+      .forEach((i) => { if (room > 0) { fits.push(i); room--; } else left.push(i); });
+    return { fits, left };
+  }
+
   return {
     DAY,
     toISO, todayISO, parseISO, addDays, daysBetween, daysUntil,
@@ -333,6 +380,7 @@
     isUuid, uuid, normalizeInvoice, fingerprint, planUpload, mergeSettingsForUpload, hasLocalData,
     invoiceToRow, rowToInvoice, reminderToRow, rowToReminder, settingsToRow, rowToSettings, assemble,
     INVOICE_COLUMNS, REMINDER_COLUMNS,
-    coalesceOps, pendingKeys, mergeRemote, isTransientError
+    coalesceOps, pendingKeys, mergeRemote, isTransientError, planLimitError,
+    FREE_ACTIVE_LIMIT, planFromProfile, isPro, activeCount, fitToPlan
   };
 });

@@ -36,6 +36,7 @@
     <section class="view" id="view-dashboard">
       <h1 id="greeting">Welcome back 👋</h1>
       <p class="sub">Here's who needs a nudge today.</p>
+      <p class="plan-note" id="planNote" hidden></p>
 
       <div class="stats">
         <div class="stat accent"><div class="label">Outstanding</div><div class="value" id="statOutstanding">$0</div></div>
@@ -116,6 +117,16 @@
         </form>
       </div>
 
+      <div class="panel" style="padding:20px" id="planPanel" hidden>
+        <h2 style="margin:0 0 6px;font-size:1.05rem">⭐ Plan &amp; billing</h2>
+        <p style="margin:0 0 4px"><strong id="planName">Free</strong> <span class="badge badge-muted" id="planBadge" hidden></span></p>
+        <p class="sub" style="margin-bottom:16px" id="planDetail"></p>
+        <div class="toolbar">
+          <button class="btn btn-sm btn-primary" id="planUpgradeBtn" type="button">Upgrade to Pro</button>
+          <button class="btn btn-sm" id="planManageBtn" type="button" hidden>Manage billing</button>
+        </div>
+      </div>
+
       <div class="panel" style="padding:20px" id="autoPanel" hidden>
         <h2 style="margin:0 0 6px;font-size:1.05rem">⏰ Automatic reminders</h2>
         <p class="sub" style="margin-bottom:16px" id="autoPanelNote">ShutterPaid emails your clients for you on this schedule. Turn it on for each invoice. Reminders stop as soon as an invoice is marked paid.</p>
@@ -192,6 +203,7 @@
       <fieldset class="fieldset" id="invoiceAuto" hidden>
         <legend>Automatic reminders</legend>
         <label class="check"><input type="checkbox" name="autoRemind" id="autoRemindInput"> Email this client automatically until the invoice is paid</label>
+        <p class="upsell" id="autoUpsell" hidden>Automatic reminders are part of Pro. <button type="button" class="linkish" data-upgrade="auto">Try Pro free for 14 days</button></p>
         <p class="hint" id="autoRemindHint" style="margin:0"></p>
         <details id="customScheduleDetails">
           <summary>Use a different schedule for this invoice</summary>
@@ -251,6 +263,30 @@
       <p class="form-error" id="authError" role="alert"></p>
       <div class="dialog-actions">
         <button class="btn btn-ghost" id="authClose" type="button">Not now</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Upgrade dialog -->
+  <dialog id="upgradeDialog" aria-labelledby="upgradeTitle">
+    <div class="dialog-inner">
+      <h2 id="upgradeTitle">Upgrade to ShutterPaid Pro</h2>
+      <p id="upgradeReason" style="margin:0 0 16px"></p>
+      <ul class="pro-list">
+        <li>Unlimited active invoices</li>
+        <li>Automatic reminders on your schedule, sent from your name</li>
+        <li>Reminders stop on their own as soon as an invoice is paid</li>
+      </ul>
+      <fieldset class="interval-picker">
+        <legend class="visually-hidden">Billing period</legend>
+        <label class="interval"><input type="radio" name="interval" value="month" checked><span><strong>Monthly</strong><span class="price"><span data-price="month">$9</span>/month</span></span></label>
+        <label class="interval"><input type="radio" name="interval" value="year"><span><strong>Yearly</strong><span class="price"><span data-price="year">$90</span>/year</span><span class="save">2 months free</span></span></label>
+      </fieldset>
+      <p class="hint" id="upgradeTrialNote" style="margin:12px 0 0">14 days free. No card needed to start; you choose whether to continue.</p>
+      <p class="form-error" id="upgradeError" role="alert"></p>
+      <div class="dialog-actions">
+        <button class="btn btn-ghost" id="upgradeClose" type="button">Not now</button>
+        <button class="btn btn-primary" id="upgradeGo" type="button">Start free trial</button>
       </div>
     </div>
   </dialog>

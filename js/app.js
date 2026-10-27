@@ -47,7 +47,8 @@
     }
     const out = {
       invoices: data && Array.isArray(data.invoices) ? data.invoices : [],
-      settings: Object.assign({}, defaultSettings, data && data.settings)
+      settings: Object.assign({}, defaultSettings, data && data.settings),
+      plan: data && data.plan ? data.plan : null
     };
     // Upgrade ids from older versions to UUIDs so they can be synced without duplicates.
     const changed = out.invoices.map(Core.normalizeInvoice).some(Boolean);
@@ -75,6 +76,25 @@
     const data = load(storeKey());
     state.invoices = data.invoices;
     state.settings = data.settings;
+    state.plan = data.plan;
+  }
+
+  // ---------- Plans ----------
+  // Display prices; the real prices live in Stripe (STRIPE_PRICE_MONTHLY / _YEARLY). Keep in sync.
+  const PRICES = { month: '$9', year: '$90' };
+  const LIMIT = Core.FREE_ACTIVE_LIMIT;
+
+  // Limits apply to accounts. Local-only mode (no account) works as before.
+  function onFreePlan() {
+    return !!userId() && !Core.isPro(state.plan);
+  }
+
+  function isPro() {
+    return !!userId() && Core.isPro(state.plan);
+  }
+
+  function roomLeft() {
+    return onFreePlan() ? LIMIT - Core.activeCount(state.invoices) : Infinity;
   }
 
   // ---------- Changes (local cache first, then queued for sync) ----------
@@ -236,6 +256,7 @@
   function autoStatus(inv) {
     if (!inv.autoRemind || !userId()) return null;
     if (inv.paid) return null;
+    if (!isPro()) return { cls: 'warn', text: '⏸ Auto reminders paused: they need ShutterPaid Pro' };
     if (inv.remindersStoppedAt) return { cls: 'warn', text: '⏸ The client asked to stop automatic reminders for this invoice' };
     if (!inv.clientEmail) return { cls: 'warn', text: '⚠️ Add the client\'s email to send automatic reminders' };
     if (!state.settings.businessName && !state.settings.ownerName) return { cls: 'warn', text: '⚠️ Add your business name in Settings to send automatic reminders' };
@@ -425,6 +446,7 @@
     renderDashboard();
     renderInvoices();
     renderAccount();
+    renderPlan();
   }
 
   // ---------- Account & sync status ----------
@@ -496,6 +518,7 @@
   const invoiceForm = $('#invoiceForm');
 
   function openInvoiceDialog(inv) {
+    if (!inv && roomLeft() <= 0) return openUpgrade('limit');
     invoiceForm.reset();
     const f = invoiceForm.elements;
     $('#invoiceDialogTitle').textContent = inv ? 'Edit invoice' : 'New invoice';
@@ -519,8 +542,11 @@
     if (!Cloud.enabled) return;
     const signedIn = !!userId();
     const input = $('#autoRemindInput');
+    const proOnly = signedIn && !isPro();
     input.checked = signedIn && !!(inv ? inv.autoRemind : false);
-    input.disabled = !signedIn || !!(inv && inv.remindersStoppedAt);
+    // Free accounts can switch auto-reminders off but not on.
+    input.disabled = !signedIn || !!(inv && inv.remindersStoppedAt) || (proOnly && !input.checked);
+    $('#autoUpsell').hidden = !proOnly;
     const custom = inv && inv.reminderSchedule;
     $('#customScheduleInput').checked = !!custom;
     $('#customScheduleDetails').open = !!custom;
@@ -561,7 +587,7 @@
     };
     const existing = state.invoices.find((i) => i.id === f.id.value);
     if (Cloud.enabled && userId()) {
-      data.autoRemind = $('#autoRemindInput').checked;
+      data.autoRemind = $('#autoRemindInput').checked && (isPro() || !!(existing && existing.autoRemind));
       const custom = $('#customScheduleInput').checked ? readScheduleEditor($('#invoiceSchedule')) : [];
       data.reminderSchedule = custom.length ? custom : null;
       if (data.autoRemind && !data.clientEmail) {
@@ -601,9 +627,11 @@
         inv.paid = true;
         inv.paidDate = todayISO();
         putInvoice(inv); renderAll();
+        freedSlot();
         toast('Marked paid — nice work! 💸');
         break;
       case 'unpaid':
+        if (roomLeft() <= 0) return openUpgrade('limit');
         inv.paid = false;
         inv.paidDate = '';
         putInvoice(inv); renderAll();
@@ -614,6 +642,7 @@
       case 'delete':
         if (confirm('Delete the invoice for ' + inv.clientName + '?')) {
           deleteInvoice(inv); renderAll();
+          freedSlot();
           toast('Invoice deleted');
         }
         break;
@@ -718,6 +747,10 @@
     try {
       const data = JSON.parse(await file.text());
       if (!Array.isArray(data.invoices)) throw new Error('Missing invoices');
+      if (onFreePlan() && Core.activeCount(data.invoices) > LIMIT) {
+        openUpgrade('import');
+        return;
+      }
       if (!confirm('Replace your current data with this backup?')) return;
       // Fresh ids, so a backup restored into two accounts never collides.
       const next = data.invoices.map((inv) => {
@@ -738,6 +771,7 @@
   });
 
   $('#demoBtn').addEventListener('click', () => {
+    if (roomLeft() < 4) return openUpgrade('sample');
     if (state.invoices.length && !confirm('Add sample invoices alongside your existing data?')) return;
     const t = todayISO();
     const cur = state.settings.currency;
@@ -872,6 +906,7 @@
   function offeredKey(id) { return 'shutterpaid:uploaded:' + id; }
 
   function maybeOfferUpload(u) {
+    if (uploadDialog.open) return;
     let device;
     try {
       if (localStorage.getItem(offeredKey(u.id))) return;
@@ -898,8 +933,12 @@
       const device = load(LOCAL_KEY);
       // Upload what's not already queued, and compare against what the account already has.
       const remote = await Cloud.fetchRemote();
+      if (remote.profile) state.plan = Core.planFromProfile(remote.profile);
       const known = state.invoices.concat(remote.invoices);
       const plan = Core.planUpload(device.invoices, known);
+      // On the Free plan, upload what fits and keep the rest on this device for later.
+      const fit = onFreePlan() ? Core.fitToPlan(plan.upload, Core.activeCount(state.invoices), LIMIT) : { fits: plan.upload, left: [] };
+      plan.upload = fit.fits;
       plan.upload.forEach((inv) => {
         state.invoices.push(inv);
         queueInvoice(inv);
@@ -911,14 +950,20 @@
         queueSettings();
       }
       save();
-      // Keep the original device data under a different key, just in case, and stop asking.
+      // Keep the original device data under a different key, just in case. Anything that didn't fit
+      // the Free plan stays as device data, and we'll offer it again after an upgrade.
       write(LOCAL_KEY + ':uploaded', device);
-      localStorage.removeItem(LOCAL_KEY);
-      localStorage.setItem(offeredKey(u.id), new Date().toISOString());
+      if (fit.left.length) {
+        write(LOCAL_KEY, { invoices: fit.left, settings: device.settings });
+      } else {
+        localStorage.removeItem(LOCAL_KEY);
+        localStorage.setItem(offeredKey(u.id), new Date().toISOString());
+      }
       uploadDialog.close();
       renderAll();
       const skipped = plan.skipped.length;
       toast('Added ' + plan.upload.length + ' invoice' + (plan.upload.length === 1 ? '' : 's') + (skipped ? ' (' + skipped + ' already in your account)' : '') + ' ☁️');
+      if (fit.left.length) setTimeout(() => openUpgrade('upload', fit.left.length), 600);
     } catch (err) {
       console.warn(err);
       toast(navigator.onLine === false ? 'You\'re offline. We\'ll ask again next time.' : 'Upload failed. We\'ll ask again next time.');
@@ -934,9 +979,20 @@
     renderAll();
     renderSettings();
     if (u) maybeOfferUpload(u);
+    let next = null;
+    try { next = sessionStorage.getItem('shutterpaid:afterSignIn'); sessionStorage.removeItem('shutterpaid:afterSignIn'); } catch (e) { /* ignore */ }
+    if (u && next === 'upgrade') setTimeout(() => openUpgrade('plan'), 300);
   }
 
   function onRemote(remote) {
+    const wasPro = isPro();
+    if (remote.profile) state.plan = Core.planFromProfile(remote.profile);
+    if (isPro() && !wasPro) {
+      // Just upgraded (or the plan loaded for the first time): send anything held back by the limit,
+      // and offer device invoices that didn't fit earlier.
+      Cloud.requeueParked();
+      if (Cloud.user()) maybeOfferUpload(Cloud.user());
+    }
     const pending = Cloud.pending();
     state.invoices = Core.mergeRemote(state.invoices, remote.invoices, pending);
     if (remote.settings && !pending.settings) {
@@ -957,11 +1013,154 @@
     syncInfo = i;
     renderAccount();
     if (i.rejected) toast('Some changes couldn\'t be saved to your account.');
+    if (i.limit) {
+      toast(i.limit === 'PRO_REQUIRED'
+        ? 'Automatic reminders need Pro. Your other changes are saved.'
+        : 'The Free plan syncs ' + LIMIT + ' active invoices. Extra ones stay on this device until you upgrade.');
+    }
+  }
+
+  // ---------- Upgrade & billing ----------
+  const upgradeDialog = $('#upgradeDialog');
+  const UPGRADE_REASONS = {
+    limit: 'The Free plan includes ' + LIMIT + ' active (unpaid) invoices. Mark one paid, or upgrade for unlimited invoices.',
+    auto: 'Let ShutterPaid email your clients for you, on your schedule, until they pay.',
+    sample: 'Sample data adds 4 unpaid invoices, which would go over the Free plan\'s ' + LIMIT + ' active invoices.',
+    import: 'This backup has more than ' + LIMIT + ' unpaid invoices, more than the Free plan holds.',
+    plan: 'Unlimited invoices and automatic reminders for your photography business.'
+  };
+
+  function openUpgrade(reason, count) {
+    if (!Cloud.enabled) return toast('Upgrades aren\'t available in this version of the app.');
+    let text = UPGRADE_REASONS[reason] || UPGRADE_REASONS.plan;
+    if (reason === 'upload') text = count + ' unpaid invoice' + (count === 1 ? '' : 's') + ' from this device didn\'t fit on the Free plan. They\'re still saved here. Upgrade to add them to your account.';
+    $('#upgradeReason').textContent = text;
+    $('#upgradeError').textContent = '';
+    const trial = !(state.plan && state.plan.trialUsed);
+    $('#upgradeTitle').textContent = trial ? 'Try ShutterPaid Pro free for 14 days' : 'Upgrade to ShutterPaid Pro';
+    $('#upgradeTrialNote').hidden = !trial;
+    $('#upgradeGo').textContent = !Cloud.user() ? 'Sign in to continue' : trial ? 'Start free trial' : 'Continue to checkout';
+    $$('[data-price]').forEach((el) => { el.textContent = PRICES[el.dataset.price]; });
+    if (!upgradeDialog.open) upgradeDialog.showModal();
+  }
+
+  $('#upgradeClose').addEventListener('click', () => upgradeDialog.close());
+
+  $('#upgradeGo').addEventListener('click', async () => {
+    if (!Cloud.user()) {
+      try { sessionStorage.setItem('shutterpaid:afterSignIn', 'upgrade'); } catch (e) { /* ignore */ }
+      upgradeDialog.close();
+      return openAuth();
+    }
+    const btn = $('#upgradeGo');
+    const interval = (upgradeDialog.querySelector('[name=interval]:checked') || {}).value || 'month';
+    btn.disabled = true;
+    $('#upgradeError').textContent = '';
+    try {
+      const data = await Cloud.invoke('create-checkout', { interval });
+      track('Upgrade started', { interval });
+      window.location.href = data.url;
+    } catch (err) {
+      $('#upgradeError').textContent = err.message;
+      btn.disabled = false;
+    }
+  });
+
+  async function openBillingPortal() {
+    const btn = $('#planManageBtn');
+    btn.disabled = true;
+    try {
+      const data = await Cloud.invoke('billing-portal');
+      window.location.href = data.url;
+    } catch (err) {
+      toast(err.message);
+      btn.disabled = false;
+    }
+  }
+
+  $('#planUpgradeBtn').addEventListener('click', () => openUpgrade('plan'));
+  $('#planManageBtn').addEventListener('click', openBillingPortal);
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-upgrade]');
+    if (b) openUpgrade(b.dataset.upgrade);
+  });
+
+  // An active slot opened up: retry anything the Free plan limit held back.
+  function freedSlot() {
+    if (userId() && Cloud.parkedCount()) Cloud.requeueParked();
+  }
+
+  // Placeholder for analytics events (wired up in a later phase).
+  function track() {}
+
+  function planSummary(p) {
+    const date = (iso) => iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+    const price = p.interval ? PRICES[p.interval] + '/' + p.interval : '';
+    if (p.status === 'trialing') {
+      return 'Free trial until ' + date(p.trialEndsAt) + '. ' + (p.cancelAtPeriodEnd || !p.hasBilling
+        ? 'Add a payment method in Manage billing to keep Pro after that.'
+        : 'Then ' + price + '.');
+    }
+    if (p.status === 'past_due') return 'Your last payment didn\'t go through. Update your card in Manage billing to keep Pro.';
+    if (p.cancelAtPeriodEnd) return 'Pro until ' + date(p.periodEnd) + ', then you\'ll move to the Free plan.';
+    return [price, p.periodEnd ? 'Renews ' + date(p.periodEnd) : ''].filter(Boolean).join(' · ') + '.';
+  }
+
+  function renderPlan() {
+    const signedIn = !!userId();
+    $('#planPanel').hidden = !Cloud.enabled || !signedIn;
+    const note = $('#planNote');
+    note.hidden = !onFreePlan();
+    if (onFreePlan()) {
+      const used = Core.activeCount(state.invoices);
+      note.classList.toggle('full', used >= LIMIT);
+      note.innerHTML = 'Free plan: ' + Math.min(used, LIMIT) + ' of ' + LIMIT + ' active invoices. ' +
+        '<button type="button" class="linkish" data-upgrade="plan">' + (state.plan && state.plan.trialUsed ? 'Upgrade to Pro' : 'Try Pro free for 14 days') + '</button>';
+    }
+    if (!signedIn || !Cloud.enabled) return;
+    const p = state.plan || { plan: 'free' };
+    const pro = isPro();
+    $('#planName').textContent = pro ? 'ShutterPaid Pro' : 'Free plan';
+    const badge = $('#planBadge');
+    badge.hidden = !(pro && (p.status === 'trialing' || p.status === 'past_due'));
+    badge.textContent = p.status === 'trialing' ? 'Trial' : 'Payment issue';
+    badge.className = 'badge ' + (p.status === 'past_due' ? 'badge-danger' : 'badge-warn');
+    $('#planDetail').textContent = pro
+      ? planSummary(p)
+      : Core.activeCount(state.invoices) + ' of ' + LIMIT + ' active invoices used. Manual reminders only. Pro adds unlimited invoices and automatic reminders for ' + PRICES.month + '/month or ' + PRICES.year + '/year.';
+    $('#planUpgradeBtn').hidden = pro;
+    $('#planUpgradeBtn').textContent = p.trialUsed ? 'Upgrade to Pro' : 'Start 14-day free trial';
+    $('#planManageBtn').hidden = !p.hasBilling;
+  }
+
+  // Back from Stripe Checkout: the webhook may take a few seconds, so re-sync until Pro shows up.
+  function handleCheckoutReturn() {
+    const params = new URLSearchParams(location.search);
+    const result = params.get('checkout');
+    if (!result) return;
+    history.replaceState(null, '', location.pathname);
+    if (result === 'cancel') return toast('Checkout canceled. You\'re still on the Free plan.');
+    toast('Thanks! Setting up Pro…');
+    track('Upgraded');
+    let tries = 0;
+    const timer = setInterval(() => {
+      if (isPro() || ++tries > 10) {
+        clearInterval(timer);
+        toast(isPro() ? 'You\'re on ShutterPaid Pro 🎉' : 'Payment received. Pro will appear in a minute; pull to refresh if not.');
+        return;
+      }
+      Cloud.sync();
+    }, 3000);
   }
 
   // ---------- Boot ----------
   renderAll();
   Cloud.init({ onUser, onRemote, onStatus });
+  handleCheckoutReturn();
+  if (location.hash === '#upgrade') {
+    history.replaceState(null, '', location.pathname + location.search);
+    openUpgrade('plan');
+  }
   if (location.hash === '#new') {
     history.replaceState(null, '', location.pathname);
     openInvoiceDialog(null);

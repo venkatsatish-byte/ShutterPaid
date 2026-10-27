@@ -39,11 +39,26 @@
           return { data: q.single ? rows[0] || null : rows, error: null };
         }
         if (q.kind === 'upsert') {
+          // Like a single SQL statement: if any row breaks a rule, nothing is saved.
+          const before = JSON.stringify(d);
+          const fail = (error) => { Object.assign(d, JSON.parse(before)); return { error }; };
           for (const r of q.rows) {
             if ((table === 'profiles' ? r.id : r.user_id) !== uid()) return { error: { code: '42501', message: 'rls' } };
             if (table === 'invoices' && !/^[A-Z]{3}$/.test(r.currency)) return { error: { code: '23514', message: 'check currency' } };
             const i = d[table].findIndex((x) => x.id === r.id);
-            if (i >= 0) { if (!own(d[table][i])) return { error: { code: '42501', message: 'rls' } }; d[table][i] = Object.assign(d[table][i], r); }
+            const old = i >= 0 ? d[table][i] : null;
+            if (table === 'invoices') {
+              // Mirrors enforce_plan_limits() in the plans migration.
+              const prof = d.profiles.find((p) => p.id === uid()) || {};
+              const pro = prof.plan === 'pro';
+              const becomesActive = !r.paid && (!old || old.paid);
+              const turnsOnAuto = r.auto_remind && (!old || !old.auto_remind);
+              if (!pro && turnsOnAuto) return fail({ code: 'P0001', message: 'PRO_REQUIRED' });
+              if (!pro && becomesActive && d.invoices.filter((x) => x.user_id === uid() && !x.paid && x.id !== r.id).length >= 5) {
+                return fail({ code: 'P0001', message: 'FREE_PLAN_LIMIT' });
+              }
+            }
+            if (old) { if (!own(old)) return fail({ code: '42501', message: 'rls' }); d[table][i] = Object.assign(old, r); }
             else d[table].push(Object.assign({ created_at: new Date().toISOString() }, r));
           }
           saveDb(d); return { data: null, error: null };
@@ -67,7 +82,16 @@
       };
       return b;
     }
-    return { auth, from };
+    const functions = {
+      async invoke(name, opts) {
+        window.__invoked = (window.__invoked || []).concat([{ name, body: opts && opts.body }]);
+        if (offline()) return { data: null, error: { message: 'Failed to send a request to the Edge Function', context: {} } };
+        const url = (window.__functionUrls || {})[name];
+        if (!url) return { data: null, error: { message: 'Edge Function returned a non-2xx status code', context: { json: async () => ({ error: 'No billing account yet. Upgrade to Pro first.' }) } } };
+        return { data: { url }, error: null };
+      }
+    };
+    return { auth, from, functions };
   }
   window.supabase = { createClient };
 })();

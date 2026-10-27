@@ -20,3 +20,11 @@ export function safeEqual(a: string, b: string): boolean {
   for (let i = 0; i < x.length; i++) diff |= x[i] ^ y[i];
   return diff === 0;
 }
+
+// These endpoints authenticate with the user's access token in the Authorization header (never a
+// cookie), so allowing any origin doesn't let other sites act as the user.
+export const CORS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+};

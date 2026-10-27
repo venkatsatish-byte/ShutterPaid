@@ -11,6 +11,7 @@ ShutterPaid is an invoice reminder app for photographers. It runs as a website a
 - **Automatic reminders** (signed in): turn them on per invoice and ShutterPaid emails the client on a schedule, by default friendly 3 days before the due date, friendly on the due date, firm 7 days after and final 21 days after. Edit the default in Settings or set a custom schedule per invoice. Emails go out at your chosen hour in your time zone, from your name, with replies going to you. Reminders stop when the invoice is marked paid, and every email has a link the client can use to stop them. Each invoice shows its reminder history and the next scheduled reminder.
 - **Accounts and cloud sync** (optional): sign in with an email link/code or Google to sync invoices and settings across devices. Changes are saved on the device first and upload when you're online.
 - **Local-only mode**: without signing in, everything stays in the browser's `localStorage`, exactly as before.
+- **Plans**: Free (up to 5 active invoices, manual reminders, sync) and Pro ($9/month or $90/year: unlimited invoices and automatic reminders) with a 14-day free trial that needs no card. Upgrade with Stripe Checkout; change plan, update the card or cancel in the Stripe Customer Portal ("Manage billing"). Limits are enforced in the database, not just the app. Local-only mode (no account) has no limits.
 - **Settings** for your name, business, currency, payment link and email signature
 - **Backup**: export or import your data as JSON, or load sample data to try the app out
 
@@ -85,7 +86,30 @@ Supabase's built-in email sender is rate-limited and meant for testing. Before l
 - *Stopping.* Each invoice has a secret token that the browser can't read. The email footer links to `stop.html?t=…`, and mail apps' built-in unsubscribe button uses the RFC 8058 one-click header. Both call `stop-reminders`. Only the server can set or clear "stopped".
 - *Before sending*, the function checks there's a business or owner name (every email names the business) and a valid client email.
 
-### 4. Deploy (Vercel or Netlify)
+### 4. Payments (Stripe)
+Do all of this in **test mode** first, then repeat it in live mode at launch.
+1. **Product and prices.** In Stripe → Product catalog, create a product "ShutterPaid Pro" with two recurring prices: $9 per month and $90 per year. Copy both price IDs (`price_…`).
+2. **Customer Portal.** In Settings → Billing → Customer portal, allow customers to update payment methods, view invoices, cancel (at period end) and switch plans between the two Pro prices. Save.
+3. **Webhook.** In Developers → Webhooks, add an endpoint at `https://<project-ref>.supabase.co/functions/v1/stripe-webhook` for these events: `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.paid`, `invoice.payment_failed`. Copy its signing secret (`whsec_…`).
+4. **Secrets and deploy.** Add `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_MONTHLY` and `STRIPE_PRICE_YEARLY` to `supabase/.env.functions`, then:
+   ```bash
+   npx supabase secrets set --env-file supabase/.env.functions
+   npx supabase db push
+   npx supabase functions deploy create-checkout
+   npx supabase functions deploy billing-portal
+   npx supabase functions deploy stripe-webhook
+   ```
+5. **Try it.** Sign in, press *Start 14-day free trial*, and finish checkout (in test mode you can use card `4242 4242 4242 4242`, any future date and any CVC, or skip the card for the trial). Back in the app, Settings → Plan & billing should show the Pro trial within a few seconds. To test the end of a trial or a failed payment, use Stripe's test clocks or cancel the subscription in the dashboard.
+
+**How plans work**
+- The plan lives on `profiles` (`plan`, `plan_status`, `current_period_end`, `trial_used`, Stripe ids). Only the `stripe-webhook` function writes it; the browser can read but not change it.
+- The webhook re-reads the subscription from Stripe on every event, so retries and out-of-order events end in the correct state. `trialing`, `active` and `past_due` (while Stripe retries the card) count as Pro. A Pro period that ended more than 3 days ago counts as Free, in case a cancellation event was missed.
+- The database enforces the Free limits: a trigger refuses a 6th unpaid invoice (also when marking a paid one unpaid) and refuses switching auto-reminders on. A per-user lock stops two devices racing past the limit. `claim_auto_reminder` and `send-reminders` also skip non-Pro accounts.
+- Changes the server refuses because of the plan stay on the device and upload after an upgrade or when an invoice is paid or deleted. Downgrading never deletes anything: extra invoices stay, and automatic reminders pause until Pro is back.
+- The trial is offered once per account and needs no card; if no card is added by the end, Stripe cancels the subscription and the account returns to Free.
+- Display prices are in `index.html` and `js/app.js` (`PRICES`). If you change prices in Stripe, update them there too.
+
+### 5. Deploy (Vercel or Netlify)
 Both configs are included (`vercel.json`, `netlify.toml`). They run `node scripts/build.mjs`, which:
 - writes `js/config.js` from the `SUPABASE_URL` and `SUPABASE_ANON_KEY` environment variables, and
 - stamps the service worker cache name with the commit, so every deploy reaches users.
@@ -101,7 +125,7 @@ GitHub Pages still works, but only in local-only mode (it has no build step to w
 ## Secrets
 - Never commit `.env` or `js/config.js` (both are git-ignored). `.env.example` lists every variable.
 - Browser-safe values (Supabase URL and anon key) are set as host environment variables.
-- Server secrets (Resend, cron, and later Stripe) are set with `npx supabase secrets set` and are only read by Edge Functions. The cron job reads its URL and secret from Supabase Vault.
+- Server secrets (Resend, cron and Stripe) are set with `npx supabase secrets set` and are only read by Edge Functions. The cron job reads its URL and secret from Supabase Vault.
 
 ## How sync works
 - Signed out: data lives under `shutterpaid:data:v1` in `localStorage`, as before.
@@ -116,7 +140,7 @@ The service worker pre-caches the app for offline use. When a new version is dep
 ```bash
 npm test             # unit tests: dates, due status, sync merging, the reminder scheduler and the send run (no install needed)
 npm i -D playwright && npx playwright install chromium
-npm run test:e2e     # browser tests: local-only mode, sign-in, upload, offline queue, update prompt, reminder settings, stop page
+npm run test:e2e     # browser tests: local-only mode, sign-in, upload, offline queue, update prompt, reminders, stop page, plans and upgrade
 ```
 The browser tests use an in-page fake of Supabase (`tests/e2e/fake-supabase.js`), so they need no real project.
 
@@ -140,7 +164,7 @@ js/config.js           Generated at deploy from env vars (not committed)
 stop.html              Page where clients stop reminders for an invoice
 sw.js                  Offline cache
 supabase/migrations/   Database schema, Row Level Security, reminder claiming, hourly cron
-supabase/functions/    Edge Functions: send-reminders, stop-reminders
+supabase/functions/    Edge Functions: send-reminders, stop-reminders, create-checkout, billing-portal, stripe-webhook
 scripts/build.mjs      Deploy step: writes js/config.js, versions the service worker
 tests/                 Unit tests (node:test) and browser tests (Playwright)
 manifest.webmanifest   PWA manifest
@@ -148,6 +172,5 @@ icons/                 App icons (SVG + PNG + maskable)
 ```
 
 ## Roadmap
-- Pro plan with Stripe subscriptions
 - PDF invoice generation
 - Stripe payment links created per invoice

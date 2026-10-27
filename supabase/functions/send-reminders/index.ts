@@ -68,6 +68,7 @@ Deno.serve(async (req) => {
                 email: p.email, ownerName: p.owner_name, businessName: p.business_name, currency: p.currency,
                 paymentLink: p.payment_link, signature: p.signature, timeZone: p.time_zone,
                 reminderSchedule: p.reminder_schedule, sendHour: p.send_hour, replyTo: p.reply_to,
+                pro: p.plan === 'pro' && (!p.current_period_end || Date.parse(p.current_period_end) > Date.now() - 3 * 86400_000),
               },
             };
           });

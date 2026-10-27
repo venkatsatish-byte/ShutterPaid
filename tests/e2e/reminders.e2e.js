@@ -28,6 +28,10 @@ module.exports = async function run() {
   await page.goto(BASE + 'app.html');
   await signIn(page, 'a@x.com', { quick: true });
   await synced(page);
+  // Automatic reminders are a Pro feature (plans are covered in billing.e2e.js).
+  await editDb(page, `Object.assign(d.profiles.find((x) => x.id.startsWith('1111')), { plan: 'pro', plan_status: 'active' });`);
+  await page.evaluate(() => SPCloud.sync());
+  await synced(page);
 
   // Signed in, but no business name yet: the dialog says so after saving.
   await page.click('.tabbar [data-view=settings]');

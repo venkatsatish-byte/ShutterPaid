@@ -155,3 +155,27 @@ test('failed automatic sends do not count towards the suggested tone', () => {
   assert.equal(C.suggestedTone(inv({ dueDate: '2026-03-08', reminders: [failed] }), TODAY), 'friendly');
   assert.equal(C.suggestedTone(inv({ dueDate: '2026-03-08', reminders: [{ id: C.uuid(), channel: 'email' }] }), TODAY), 'firm');
 });
+
+test('plans: isPro, limits and errors', () => {
+  const now = Date.parse('2026-03-10T00:00:00Z');
+  assert.equal(C.isPro(C.planFromProfile({ plan: 'pro', current_period_end: '2026-04-01T00:00:00Z' }), now), true);
+  assert.equal(C.isPro(C.planFromProfile({ plan: 'pro', current_period_end: '2026-03-08T00:00:00Z' }), now), true); // grace
+  assert.equal(C.isPro(C.planFromProfile({ plan: 'pro', current_period_end: '2026-03-01T00:00:00Z' }), now), false);
+  assert.equal(C.isPro(C.planFromProfile({ plan: 'free' }), now), false);
+  assert.equal(C.isPro(null), false);
+  assert.equal(C.planLimitError({ code: 'P0001', message: 'FREE_PLAN_LIMIT' }), 'FREE_PLAN_LIMIT');
+  assert.equal(C.planLimitError({ code: 'P0001', message: 'PRO_REQUIRED' }), 'PRO_REQUIRED');
+  assert.equal(C.planLimitError({ code: '42501', message: 'permission denied' }), null);
+});
+
+test('fitToPlan keeps paid invoices and the soonest-due unpaid ones', () => {
+  const list = [
+    inv({ id: 'p1', paid: true }), inv({ id: 'u-late', dueDate: '2026-05-01' }),
+    inv({ id: 'u-soon', dueDate: '2026-03-01' }), inv({ id: 'u-mid', dueDate: '2026-04-01' })
+  ];
+  const r = C.fitToPlan(list, 3, 5);
+  assert.deepEqual(r.fits.map((i) => i.id), ['p1', 'u-soon', 'u-mid']);
+  assert.deepEqual(r.left.map((i) => i.id), ['u-late']);
+  assert.equal(C.fitToPlan(list, 9, 5).fits.length, 1);
+  assert.equal(C.fitToPlan(list, 0, Infinity).left.length, 0);
+});

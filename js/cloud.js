@@ -202,7 +202,36 @@
   }
 
   function pending() {
-    return Core.pendingKeys(user ? readOutbox() : []);
+    return Core.pendingKeys(user ? readOutbox().concat(readParked()) : []);
+  }
+
+  // Changes the server refused because of the plan (FREE_PLAN_LIMIT / PRO_REQUIRED) are set aside
+  // instead of dropped, so the invoice stays on this device. They go back in the queue when the
+  // account upgrades or frees up room (requeueParked).
+  function parkedKey(id) { return 'shutterpaid:parked:' + id; }
+
+  function readParked(id) {
+    try {
+      return JSON.parse(localStorage.getItem(parkedKey(id || (user && user.id))) || '[]');
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function writeParked(ops) {
+    if (!user) return;
+    try {
+      if (ops.length) localStorage.setItem(parkedKey(user.id), JSON.stringify(ops));
+      else localStorage.removeItem(parkedKey(user.id));
+    } catch (e) { /* ignore */ }
+  }
+
+  function requeueParked() {
+    const parked = readParked();
+    if (!parked.length) return;
+    writeParked([]);
+    writeOutbox(Core.coalesceOps(parked.concat(readOutbox())));
+    scheduleSync();
   }
 
   async function runBatch(c, batch) {
@@ -221,13 +250,21 @@
       while (batch.length < 200 && ops[batch.length] && ops[batch.length].table === ops[0].table && ops[batch.length].op === ops[0].op) {
         batch.push(ops[batch.length]);
       }
-      const { error } = await runBatch(c, batch);
+      let { error } = await runBatch(c, batch);
       if (error && Core.isTransientError(error)) throw error;
-      if (error) {
-        // The server rejected these rows outright (validation or permission). Retrying won't help,
-        // so drop them and tell the user; their local copy stays on this device.
-        console.error('Sync rejected', error, batch);
-        handlers.onStatus(Object.assign(info(), { rejected: error.message }));
+      if (error && batch.length > 1) {
+        // One bad row fails the whole statement: retry one at a time so the good rows still save.
+        for (let i = 0; i < batch.length; i++) {
+          const one = await runBatch(c, [batch[i]]);
+          if (one.error && Core.isTransientError(one.error)) {
+            batch.length = i; // keep the rest queued
+            break;
+          }
+          if (one.error) reject(batch[i], one.error);
+        }
+        error = null;
+      } else if (error) {
+        reject(batch[0], error);
       }
       // Re-read in case the user made more changes while we were waiting on the network: an op that
       // was replaced by a newer version of the same row stays queued.
@@ -236,6 +273,19 @@
       writeOutbox(latest);
       ops = Core.coalesceOps(latest);
     }
+  }
+
+  function reject(op, error) {
+    const limit = Core.planLimitError(error);
+    if (limit) {
+      writeParked(Core.coalesceOps(readParked().concat([op])));
+      handlers.onStatus(Object.assign(info(), { limit }));
+      return;
+    }
+    // Rejected outright (validation or permission). Retrying won't help, so drop it and tell the
+    // user; their local copy stays on this device.
+    console.error('Sync rejected', error, op);
+    handlers.onStatus(Object.assign(info(), { rejected: error.message }));
   }
 
   async function selectAll(c, table, columns) {
@@ -292,7 +342,23 @@
   function discardLocalCopy(id) {
     try {
       localStorage.removeItem(outboxKey(id));
+      localStorage.removeItem(parkedKey(id));
     } catch (e) { /* ignore */ }
+  }
+
+  // Call a billing Edge Function with the user's session; returns { url }.
+  async function invoke(name, body) {
+    const c = await ensureClient();
+    const { data, error } = await c.functions.invoke(name, { body: body || {} });
+    if (error) {
+      let message = 'Something went wrong. Please try again.';
+      try {
+        const detail = error.context && typeof error.context.json === 'function' ? await error.context.json() : null;
+        if (detail && detail.error) message = detail.error;
+      } catch (e) { /* keep the generic message */ }
+      throw new Error(navigator.onLine === false ? 'You\'re offline. Connect to the internet and try again.' : message);
+    }
+    return data;
   }
 
   window.SPCloud = {
@@ -306,7 +372,10 @@
     signOut,
     enqueue,
     pending,
-    pendingCount: (id) => readOutbox(id).length,
+    pendingCount: (id) => readOutbox(id).length + readParked(id).length,
+    parkedCount: () => readParked().length,
+    requeueParked,
+    invoke,
     fetchRemote,
     sync,
     discardLocalCopy

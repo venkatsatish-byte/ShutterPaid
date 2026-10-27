@@ -31,6 +31,8 @@
     for (const { invoice, profile, token } of rows) {
       report.checked++;
       if (deps.deadlineMs && Date.now() - started > deps.deadlineMs) { skip('out-of-time'); continue; }
+      // Automatic reminders are a Pro feature (claim_auto_reminder checks this again in the database).
+      if (profile.pro === false) { skip('not-pro'); continue; }
       const local = S.localNow(now, profile.timeZone);
       const sendHour = Number.isInteger(profile.sendHour) ? profile.sendHour : S.DEFAULT_SEND_HOUR;
       if (local.hour < sendHour) { skip('before-send-hour'); continue; }

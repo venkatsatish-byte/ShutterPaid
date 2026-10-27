@@ -18,6 +18,7 @@
       <nav class="nav-links">
         <a href="#features">Features</a>
         <a href="#how">How it works</a>
+        <a href="#pricing">Pricing</a>
         <button class="btn btn-sm btn-ghost" id="installBtn" hidden>Install app</button>
         <a class="btn btn-sm btn-primary" href="app.html">Open app</a>
       </nav>
@@ -83,6 +84,46 @@
       </div>
     </section>
 
+    <section id="pricing">
+      <div class="container">
+        <div class="section-title">
+          <h2>Simple <span class="grad-text">pricing</span></h2>
+          <p>Start free. Upgrade when you want ShutterPaid to do the chasing for you.</p>
+        </div>
+        <div class="billing-toggle toolbar" role="group" aria-label="Billing period">
+          <button class="chip active" type="button" data-interval="month" aria-pressed="true">Monthly</button>
+          <button class="chip" type="button" data-interval="year" aria-pressed="false">Yearly · 2 months free</button>
+        </div>
+        <div class="pricing">
+          <div class="price-card">
+            <h3>Free</h3>
+            <div class="amount">$0</div>
+            <ul>
+              <li>Up to 5 active (unpaid) invoices</li>
+              <li>Friendly, firm and final reminder templates</li>
+              <li>Send reminders yourself by email, WhatsApp or SMS</li>
+              <li>Sync across your devices</li>
+              <li class="no">Automatic reminders</li>
+            </ul>
+            <a class="btn" href="app.html">Start for free</a>
+          </div>
+          <div class="price-card featured">
+            <h3>Pro</h3>
+            <div class="amount" id="proPrice">$9 <small>/ month</small></div>
+            <ul>
+              <li>Unlimited invoices</li>
+              <li>Automatic reminders on your schedule, sent from your name</li>
+              <li>Reminders stop as soon as an invoice is marked paid</li>
+              <li>Clients can opt out of reminders for an invoice</li>
+              <li>Everything in Free</li>
+            </ul>
+            <a class="btn btn-primary" href="app.html#upgrade">Try Pro free for 14 days</a>
+            <p class="fine">No card needed for the trial. Cancel any time.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <section>
       <div class="container">
         <div class="cta-band">
@@ -99,6 +140,23 @@
   </footer>
 
   <script src="js/pwa.js"></script>
-  <script>document.getElementById('year').textContent = new Date().getFullYear();</script>
+  <script>
+    document.getElementById('year').textContent = new Date().getFullYear();
+    // Pricing: switch between monthly and yearly display prices (keep in sync with Stripe).
+    (function () {
+      var prices = { month: '$9 <small>/ month</small>', year: '$90 <small>/ year</small>' };
+      var chips = document.querySelectorAll('[data-interval]');
+      chips.forEach(function (chip) {
+        chip.addEventListener('click', function () {
+          chips.forEach(function (c) {
+            var on = c === chip;
+            c.classList.toggle('active', on);
+            c.setAttribute('aria-pressed', String(on));
+          });
+          document.getElementById('proPrice').innerHTML = prices[chip.dataset.interval];
+        });
+      });
+    })();
+  </script>
 </body>
 </html>

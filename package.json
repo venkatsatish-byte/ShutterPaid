@@ -1,0 +1,10 @@
+{
+  "name": "shutterpaid",
+  "private": true,
+  "description": "Invoice reminders for photographers. No build step; scripts/build.mjs only writes public config at deploy.",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node --test tests/*.test.js",
+    "test:e2e": "node tests/e2e/app.e2e.js"
+  }
+}

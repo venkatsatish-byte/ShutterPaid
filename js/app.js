@@ -1,9 +1,12 @@
-// ShutterPaid app logic. All data lives in localStorage on the user's device.
+// ShutterPaid app logic.
+// Signed out, all data lives in localStorage on this device (local-only mode).
+// Signed in, data is cached in localStorage per account and synced to Supabase by js/cloud.js.
 (function () {
   'use strict';
 
-  const STORE_KEY = 'shutterpaid:data:v1';
-  const DAY = 24 * 60 * 60 * 1000;
+  const Core = window.SPCore;
+  const Cloud = window.SPCloud;
+  const LOCAL_KEY = 'shutterpaid:data:v1';
 
   const defaultSettings = {
     ownerName: '',
@@ -11,35 +14,108 @@
     currency: 'USD',
     soonDays: 3,
     paymentLink: '',
-    signature: ''
+    signature: '',
+    timeZone: deviceTimeZone()
   };
 
-  // ---------- Storage ----------
-  function load() {
+  function deviceTimeZone() {
     try {
-      const raw = localStorage.getItem(STORE_KEY);
-      if (raw) {
-        const data = JSON.parse(raw);
-        return {
-          invoices: Array.isArray(data.invoices) ? data.invoices : [],
-          settings: Object.assign({}, defaultSettings, data.settings)
-        };
-      }
+      return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    } catch (e) {
+      return 'UTC';
+    }
+  }
+
+  // ---------- Storage ----------
+  // The account cache key, or the device-only key when signed out.
+  function storeKey() {
+    const u = Cloud.user();
+    return u ? 'shutterpaid:cache:' + u.id : LOCAL_KEY;
+  }
+
+  function load(key) {
+    let data = null;
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw) data = JSON.parse(raw);
     } catch (e) {
       console.warn('Could not read saved data', e);
     }
-    return { invoices: [], settings: Object.assign({}, defaultSettings) };
+    const out = {
+      invoices: data && Array.isArray(data.invoices) ? data.invoices : [],
+      settings: Object.assign({}, defaultSettings, data && data.settings)
+    };
+    // Upgrade ids from older versions to UUIDs so they can be synced without duplicates.
+    const changed = out.invoices.map(Core.normalizeInvoice).some(Boolean);
+    if (changed) write(key, out);
+    return out;
   }
 
-  function save() {
+  function write(key, data) {
     try {
-      localStorage.setItem(STORE_KEY, JSON.stringify(state));
+      localStorage.setItem(key, JSON.stringify(data));
+      return true;
     } catch (e) {
       toast('Could not save. Is storage full or disabled?');
+      return false;
     }
   }
 
-  const state = load();
+  function save() {
+    write(storeKey(), state);
+  }
+
+  const state = load(storeKey());
+
+  function useStore() {
+    const data = load(storeKey());
+    state.invoices = data.invoices;
+    state.settings = data.settings;
+  }
+
+  // ---------- Changes (local cache first, then queued for sync) ----------
+  function userId() {
+    const u = Cloud.user();
+    return u ? u.id : null;
+  }
+
+  function queueInvoice(inv) {
+    if (userId()) Cloud.enqueue({ table: 'invoices', op: 'upsert', id: inv.id, row: Core.invoiceToRow(inv, userId()) });
+  }
+
+  function queueInvoiceDelete(id) {
+    if (userId()) Cloud.enqueue({ table: 'invoices', op: 'delete', id: id });
+  }
+
+  function queueReminder(inv, r) {
+    if (userId()) Cloud.enqueue({ table: 'reminder_log', op: 'upsert', id: r.id, row: Core.reminderToRow(inv.id, r, userId()) });
+  }
+
+  function queueSettings() {
+    if (userId()) Cloud.enqueue({ table: 'profiles', op: 'upsert', id: userId(), row: Core.settingsToRow(state.settings, userId()) });
+  }
+
+  function putInvoice(inv) {
+    if (!state.invoices.includes(inv)) state.invoices.push(inv);
+    save();
+    queueInvoice(inv);
+  }
+
+  function deleteInvoice(inv) {
+    state.invoices = state.invoices.filter((i) => i !== inv);
+    save();
+    queueInvoiceDelete(inv.id);
+  }
+
+  function replaceAllInvoices(next) {
+    state.invoices.forEach((i) => queueInvoiceDelete(i.id));
+    state.invoices = next;
+    save();
+    next.forEach((inv) => {
+      queueInvoice(inv);
+      inv.reminders.forEach((r) => queueReminder(inv, r));
+    });
+  }
 
   // ---------- Helpers ----------
   const $ = (sel, root) => (root || document).querySelector(sel);
@@ -51,35 +127,11 @@
     ));
   }
 
-  function uid() {
-    return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-  }
-
-  function todayISO() {
-    const d = new Date();
-    return toISO(d);
-  }
-
-  function toISO(d) {
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return d.getFullYear() + '-' + m + '-' + day;
-  }
-
-  function parseISO(iso) {
-    const [y, m, d] = iso.split('-').map(Number);
-    return new Date(y, m - 1, d);
-  }
-
-  function addDays(iso, n) {
-    const d = parseISO(iso);
-    d.setDate(d.getDate() + n);
-    return toISO(d);
-  }
-
-  function daysUntil(iso) {
-    return Math.round((parseISO(iso) - parseISO(todayISO())) / DAY);
-  }
+  const uid = Core.uuid;
+  const todayISO = () => Core.todayISO();
+  const parseISO = Core.parseISO;
+  const addDays = Core.addDays;
+  const daysUntil = (iso) => Core.daysUntil(iso);
 
   function money(amount, currency) {
     try {
@@ -100,21 +152,11 @@
   }
 
   function relativeDue(inv) {
-    if (inv.paid) return 'Paid ' + prettyDate(inv.paidDate);
-    const n = daysUntil(inv.dueDate);
-    if (n === 0) return 'Due today';
-    if (n === 1) return 'Due tomorrow';
-    if (n > 1) return 'Due in ' + n + ' days';
-    if (n === -1) return 'Due yesterday';
-    return 'Overdue by ' + Math.abs(n) + ' days';
+    return Core.relativeDue(inv, todayISO(), prettyDate);
   }
 
   function statusOf(inv) {
-    if (inv.paid) return 'paid';
-    const n = daysUntil(inv.dueDate);
-    if (n < 0) return 'overdue';
-    if (n <= Number(state.settings.soonDays)) return 'soon';
-    return 'open';
+    return Core.statusOf(inv, state.settings.soonDays, todayISO());
   }
 
   const BADGES = {
@@ -153,14 +195,14 @@
 
     const actions = [];
     if (!inv.paid) {
-      actions.push('<button class="btn btn-sm btn-primary" data-act="remind" data-id="' + inv.id + '">✉️ Remind</button>');
-      actions.push('<button class="btn btn-sm" data-act="paid" data-id="' + inv.id + '">✅ Mark paid</button>');
+      actions.push('<button class="btn btn-sm btn-primary" data-act="remind" data-id="' + esc(inv.id) + '">✉️ Remind</button>');
+      actions.push('<button class="btn btn-sm" data-act="paid" data-id="' + esc(inv.id) + '">✅ Mark paid</button>');
     } else {
-      actions.push('<button class="btn btn-sm" data-act="unpaid" data-id="' + inv.id + '">↩️ Mark unpaid</button>');
+      actions.push('<button class="btn btn-sm" data-act="unpaid" data-id="' + esc(inv.id) + '">↩️ Mark unpaid</button>');
     }
     if (!opts || !opts.compact) {
-      actions.push('<button class="btn btn-sm btn-ghost" data-act="edit" data-id="' + inv.id + '">Edit</button>');
-      actions.push('<button class="btn btn-sm btn-ghost btn-danger" data-act="delete" data-id="' + inv.id + '">Delete</button>');
+      actions.push('<button class="btn btn-sm btn-ghost" data-act="edit" data-id="' + esc(inv.id) + '">Edit</button>');
+      actions.push('<button class="btn btn-sm btn-ghost btn-danger" data-act="delete" data-id="' + esc(inv.id) + '">Delete</button>');
     }
 
     return '<li class="item">' +
@@ -231,10 +273,56 @@
   function renderAll() {
     renderDashboard();
     renderInvoices();
+    renderAccount();
+  }
+
+  // ---------- Account & sync status ----------
+  const SYNC_LABELS = {
+    'signed-out': 'Sign in',
+    syncing: 'Syncing…',
+    synced: 'Synced',
+    offline: 'Offline',
+    error: 'Sync issue'
+  };
+  let syncInfo = Cloud.info();
+
+  function syncDetail(i) {
+    const n = i.pending;
+    const queued = n ? n + ' change' + (n === 1 ? '' : 's') + ' waiting to upload. ' : '';
+    if (i.status === 'offline') return 'You\'re offline. ' + queued + 'Changes are saved on this device and will sync when you\'re back online.';
+    if (i.status === 'error') return queued + 'We couldn\'t reach your account. We\'ll keep trying.';
+    if (i.status === 'syncing') return queued + 'Syncing with your account…';
+    if (i.lastSynced) return 'All changes saved to your account. Last synced ' + i.lastSynced.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) + '.';
+    return 'All changes saved to your account.';
+  }
+
+  function renderAccount() {
+    if (!Cloud.enabled) return;
+    const i = syncInfo;
+    const signedIn = !!i.user;
+    const btn = $('#accountBtn');
+    btn.hidden = false;
+    btn.dataset.status = i.status;
+    $('#accountBtnLabel').textContent = SYNC_LABELS[i.status] || 'Account';
+    btn.setAttribute('aria-label', signedIn ? 'Account and sync: ' + (SYNC_LABELS[i.status] || '') : 'Sign in to sync');
+
+    $('#accountPanel').hidden = false;
+    $('#accountSignedOut').hidden = signedIn;
+    $('#accountSignedIn').hidden = !signedIn;
+    if (signedIn) {
+      $('#accountEmail').textContent = i.user.email || 'your account';
+      $('#syncDetail').textContent = syncDetail(i);
+    }
+    $('#backupNote').textContent = signedIn
+      ? 'Your invoices sync to your account. You can still export a backup at any time.'
+      : 'Your data is stored only on this device. Export a backup to keep it safe or move it to another device.';
+    $('#resetBtn').textContent = signedIn ? 'Erase all account data' : 'Erase all data';
   }
 
   // ---------- Navigation ----------
+  let currentView = 'dashboard';
   function showView(name) {
+    currentView = name;
     $$('.view').forEach((v) => { v.hidden = v.id !== 'view-' + name; });
     $$('.tabbar button').forEach((b) => b.classList.toggle('active', b.dataset.view === name));
     if (name === 'settings') renderSettings();
@@ -290,12 +378,12 @@
     const existing = state.invoices.find((i) => i.id === f.id.value);
     if (existing) {
       Object.assign(existing, data);
+      putInvoice(existing);
       toast('Invoice updated');
     } else {
-      state.invoices.push(Object.assign({ id: uid(), paid: false, paidDate: '', reminders: [], createdAt: todayISO() }, data));
+      putInvoice(Object.assign({ id: uid(), paid: false, paidDate: '', reminders: [], createdAt: todayISO() }, data));
       toast('Invoice added 📸');
     }
-    save();
     renderAll();
   });
 
@@ -314,21 +402,20 @@
       case 'paid':
         inv.paid = true;
         inv.paidDate = todayISO();
-        save(); renderAll();
+        putInvoice(inv); renderAll();
         toast('Marked paid — nice work! 💸');
         break;
       case 'unpaid':
         inv.paid = false;
         inv.paidDate = '';
-        save(); renderAll();
+        putInvoice(inv); renderAll();
         break;
       case 'edit':
         openInvoiceDialog(inv);
         break;
       case 'delete':
         if (confirm('Delete the invoice for ' + inv.clientName + '?')) {
-          state.invoices = state.invoices.filter((i) => i !== inv);
-          save(); renderAll();
+          deleteInvoice(inv); renderAll();
           toast('Invoice deleted');
         }
         break;
@@ -341,11 +428,7 @@
   let reminderTone = 'friendly';
 
   function suggestedTone(inv) {
-    const n = daysUntil(inv.dueDate);
-    const sent = (inv.reminders || []).length;
-    if (n < -21 && sent >= 2) return 'final';
-    if (n < -7 || (n < 0 && sent >= 1)) return 'firm';
-    return 'friendly';
+    return Core.suggestedTone(inv, todayISO());
   }
 
   function buildReminder(inv, tone) {
@@ -407,9 +490,11 @@
   }
 
   function logReminder(channel) {
+    const entry = { id: uid(), date: todayISO(), tone: reminderTone, channel: channel, sentAt: new Date().toISOString() };
     reminderInvoice.reminders = reminderInvoice.reminders || [];
-    reminderInvoice.reminders.push({ date: todayISO(), tone: reminderTone, channel: channel });
+    reminderInvoice.reminders.push(entry);
     save();
+    queueReminder(reminderInvoice, entry);
     renderAll();
   }
 
@@ -450,9 +535,11 @@
     e.preventDefault();
     const f = e.target.elements;
     Object.keys(defaultSettings).forEach((k) => {
-      if (f[k]) state.settings[k] = k === 'soonDays' ? Math.max(0, Number(f[k].value) || 0) : f[k].value.trim();
+      if (f[k]) state.settings[k] = k === 'soonDays' ? Math.min(30, Math.max(0, Number(f[k].value) || 0)) : f[k].value.trim();
     });
+    if (!state.settings.timeZone) state.settings.timeZone = deviceTimeZone();
     save();
+    queueSettings();
     renderAll();
     toast('Settings saved');
   });
@@ -473,9 +560,16 @@
       const data = JSON.parse(await file.text());
       if (!Array.isArray(data.invoices)) throw new Error('Missing invoices');
       if (!confirm('Replace your current data with this backup?')) return;
-      state.invoices = data.invoices;
+      // Fresh ids, so a backup restored into two accounts never collides.
+      const next = data.invoices.map((inv) => {
+        const copy = Object.assign({}, inv, { id: uid() });
+        copy.reminders = (inv.reminders || []).map((r) => Object.assign({}, r, { id: uid() }));
+        return copy;
+      });
+      replaceAllInvoices(next);
       state.settings = Object.assign({}, defaultSettings, data.settings);
-      save(); renderAll(); renderSettings();
+      save(); queueSettings();
+      renderAll(); renderSettings();
       toast('Backup restored');
     } catch (err) {
       toast('That file doesn\'t look like a ShutterPaid backup');
@@ -496,25 +590,218 @@
       { clientName: 'The Garcia Family', clientEmail: 'garcia@example.com', shootType: 'Family', amount: 450, dueDate: addDays(t, -5), shootDate: addDays(t, -20), paid: true, paidDate: addDays(t, -2) }
     ];
     sample.forEach((s) => {
-      state.invoices.push(Object.assign({
+      putInvoice(Object.assign({
         id: uid(), number: nextInvoiceNumber(), currency: cur, notes: '', paid: false, paidDate: '', reminders: [], createdAt: t
       }, s));
     });
-    save(); renderAll();
+    renderAll();
     toast('Sample data loaded');
     showView('dashboard');
   });
 
   $('#resetBtn').addEventListener('click', () => {
-    if (!confirm('This permanently erases all invoices and settings on this device. Continue?')) return;
-    state.invoices = [];
+    const msg = userId()
+      ? 'This permanently erases all invoices and settings in your account, on every device. Continue?'
+      : 'This permanently erases all invoices and settings on this device. Continue?';
+    if (!confirm(msg)) return;
+    replaceAllInvoices([]);
     state.settings = Object.assign({}, defaultSettings);
-    save(); renderAll(); renderSettings();
+    save(); queueSettings();
+    renderAll(); renderSettings();
     toast('All data erased');
   });
 
+  // ---------- Sign in / sign out ----------
+  const authDialog = $('#authDialog');
+  let authEmail = '';
+
+  function authError(err, fallback) {
+    console.warn(err);
+    const msg = err && err.message ? err.message : '';
+    $('#authError').textContent = /rate|seconds/i.test(msg) ? msg : (fallback || 'Something went wrong. Please try again.');
+  }
+
+  function openAuth() {
+    $('#authError').textContent = '';
+    $('#authStepEmail').hidden = false;
+    $('#authStepCode').hidden = true;
+    authDialog.showModal();
+    $('#authEmailInput').focus();
+  }
+
+  $('#accountBtn').addEventListener('click', () => {
+    if (Cloud.user()) {
+      showView('settings');
+      $('#accountPanel').scrollIntoView({ block: 'start' });
+    } else {
+      openAuth();
+    }
+  });
+  $('#openAuthBtn').addEventListener('click', openAuth);
+  $('#authClose').addEventListener('click', () => authDialog.close());
+
+  $('#authEmailForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    authEmail = $('#authEmailInput').value.trim();
+    if (!authEmail) return;
+    const btn = $('#authEmailBtn');
+    btn.disabled = true;
+    $('#authError').textContent = '';
+    try {
+      await Cloud.signInWithEmail(authEmail);
+      $('#authSentTo').textContent = authEmail;
+      $('#authStepEmail').hidden = true;
+      $('#authStepCode').hidden = false;
+      $('#authCodeInput').value = '';
+      $('#authCodeInput').focus();
+    } catch (err) {
+      authError(err, navigator.onLine === false ? 'You\'re offline. Connect to the internet to sign in.' : 'We couldn\'t send the email. Check the address and try again.');
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  $('#authCodeForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const code = $('#authCodeInput').value.replace(/\s/g, '');
+    if (!code) return;
+    $('#authError').textContent = '';
+    try {
+      await Cloud.verifyCode(authEmail, code);
+      authDialog.close();
+    } catch (err) {
+      authError(err, 'That code didn\'t work. Check it, or request a new email.');
+    }
+  });
+
+  $('#authBack').addEventListener('click', () => {
+    $('#authStepEmail').hidden = false;
+    $('#authStepCode').hidden = true;
+    $('#authEmailInput').focus();
+  });
+
+  $('#authGoogle').addEventListener('click', async () => {
+    try {
+      await Cloud.signInWithGoogle(); // navigates away to Google
+    } catch (err) {
+      authError(err, 'Google sign-in isn\'t available right now.');
+    }
+  });
+
+  $('#syncNowBtn').addEventListener('click', () => Cloud.sync());
+
+  $('#signOutBtn').addEventListener('click', async () => {
+    const u = Cloud.user();
+    if (!u) return;
+    const pending = Cloud.pendingCount(u.id);
+    const msg = pending
+      ? pending + ' change' + (pending === 1 ? ' hasn\'t' : 's haven\'t') + ' synced yet. They\'ll stay on this device and upload the next time you sign in. Sign out?'
+      : 'Sign out? Your invoices stay safe in your account.';
+    if (!confirm(msg)) return;
+    await Cloud.signOut();
+    // With nothing left to upload, remove the account's copy from this device (it may be shared).
+    if (!pending) {
+      try { localStorage.removeItem('shutterpaid:cache:' + u.id); } catch (e) { /* ignore */ }
+      Cloud.discardLocalCopy(u.id);
+    }
+    toast('Signed out');
+  });
+
+  // ---------- First sign-in: offer to upload device-only data ----------
+  const uploadDialog = $('#uploadDialog');
+
+  function offeredKey(id) { return 'shutterpaid:uploaded:' + id; }
+
+  function maybeOfferUpload(u) {
+    let device;
+    try {
+      if (localStorage.getItem(offeredKey(u.id))) return;
+      device = load(LOCAL_KEY);
+    } catch (e) {
+      return;
+    }
+    if (!Core.hasLocalData(device, defaultSettings)) return;
+    const n = device.invoices.length;
+    $('#uploadText').textContent = n
+      ? 'This device has ' + n + ' invoice' + (n === 1 ? '' : 's') + ' and your settings saved from before you signed in. Add them to your account so they sync everywhere? Invoices already in your account won\'t be duplicated.'
+      : 'This device has settings saved from before you signed in. Add them to your account?';
+    uploadDialog.showModal();
+  }
+
+  $('#uploadSkip').addEventListener('click', () => uploadDialog.close());
+
+  $('#uploadGo').addEventListener('click', async () => {
+    const u = Cloud.user();
+    if (!u) return uploadDialog.close();
+    const btn = $('#uploadGo');
+    btn.disabled = true;
+    try {
+      const device = load(LOCAL_KEY);
+      // Upload what's not already queued, and compare against what the account already has.
+      const remote = await Cloud.fetchRemote();
+      const known = state.invoices.concat(remote.invoices);
+      const plan = Core.planUpload(device.invoices, known);
+      plan.upload.forEach((inv) => {
+        state.invoices.push(inv);
+        queueInvoice(inv);
+        inv.reminders.forEach((r) => queueReminder(inv, r));
+      });
+      const merged = Core.mergeSettingsForUpload(device.settings, remote.settings || state.settings, defaultSettings);
+      if (merged.changed) {
+        state.settings = merged.settings;
+        queueSettings();
+      }
+      save();
+      // Keep the original device data under a different key, just in case, and stop asking.
+      write(LOCAL_KEY + ':uploaded', device);
+      localStorage.removeItem(LOCAL_KEY);
+      localStorage.setItem(offeredKey(u.id), new Date().toISOString());
+      uploadDialog.close();
+      renderAll();
+      const skipped = plan.skipped.length;
+      toast('Added ' + plan.upload.length + ' invoice' + (plan.upload.length === 1 ? '' : 's') + (skipped ? ' (' + skipped + ' already in your account)' : '') + ' ☁️');
+    } catch (err) {
+      console.warn(err);
+      toast(navigator.onLine === false ? 'You\'re offline. We\'ll ask again next time.' : 'Upload failed. We\'ll ask again next time.');
+      uploadDialog.close();
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  // ---------- Cloud hooks ----------
+  function onUser(u) {
+    useStore();
+    renderAll();
+    if (currentView === 'settings') renderSettings();
+    if (u) maybeOfferUpload(u);
+  }
+
+  function onRemote(remote) {
+    const pending = Cloud.pending();
+    state.invoices = Core.mergeRemote(state.invoices, remote.invoices, pending);
+    if (remote.settings && !pending.settings) {
+      state.settings = Object.assign({}, defaultSettings, remote.settings);
+      if (!remote.settings.timeZone) {
+        state.settings.timeZone = deviceTimeZone();
+        queueSettings();
+      }
+    }
+    save();
+    renderAll();
+    // Don't overwrite the settings form while someone is typing in it.
+    if (currentView === 'settings' && !$('#settingsForm').contains(document.activeElement)) renderSettings();
+  }
+
+  function onStatus(i) {
+    syncInfo = i;
+    renderAccount();
+    if (i.rejected) toast('Some changes couldn\'t be saved to your account.');
+  }
+
   // ---------- Boot ----------
   renderAll();
+  Cloud.init({ onUser, onRemote, onStatus });
   if (location.hash === '#new') {
     history.replaceState(null, '', location.pathname);
     openInvoiceDialog(null);

@@ -1,0 +1,13 @@
+# Secrets and generated config
+.env
+.env.*
+!.env.example
+js/config.js
+supabase/.temp/
+supabase/.branches/
+
+node_modules/
+.DS_Store
+.vercel
+.netlify
+tests/e2e/out/

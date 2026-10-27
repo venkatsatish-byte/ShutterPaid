@@ -30,6 +30,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 
 html, body { margin: 0; padding: 0; }
 
@@ -107,6 +108,7 @@ img, svg { max-width: 100%; }
 .nav-links { display: flex; gap: 20px; align-items: center; }
 .nav-links a { text-decoration: none; color: var(--muted); font-weight: 500; }
 .nav-links a:hover { color: var(--text); }
+.site-header .btn { white-space: nowrap; }
 
 /* Landing */
 .hero { padding: 80px 0 64px; text-align: center; position: relative; overflow: hidden; }
@@ -327,6 +329,43 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 textarea { resize: vertical; min-height: 90px; }
 .hint { font-size: 0.8rem; color: var(--muted); font-weight: 400; }
 
+.form-error { color: var(--danger); font-size: 0.875rem; margin: 8px 0 0; min-height: 1em; }
+.form-error:empty { display: none; }
+.divider { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 0.8rem; }
+.divider::before, .divider::after { content: ""; flex: 1; border-top: 1px solid var(--border); }
+
+/* Account / sync button */
+.account-btn { gap: 8px; }
+.sync-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+.account-btn[data-status="synced"] .sync-dot { background: var(--ok); }
+.account-btn[data-status="syncing"] .sync-dot { background: var(--warn); }
+.account-btn[data-status="offline"] .sync-dot,
+.account-btn[data-status="error"] .sync-dot { background: var(--danger); }
+.account-btn[data-status="signed-out"] .sync-dot { display: none; }
+
+/* "New version available" banner */
+.update-banner {
+  position: fixed;
+  left: 50%;
+  bottom: calc(88px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: max-content;
+  max-width: calc(100% - 24px);
+  padding: 10px 10px 10px 16px;
+  border-radius: 14px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+.update-banner[hidden] { display: none; }
+@media (min-width: 900px) { .update-banner { bottom: 24px; } }
+
 /* Bottom tab bar */
 .tabbar {
   position: fixed;
@@ -396,8 +435,17 @@ dialog::backdrop { background: rgba(5, 5, 20, 0.6); backdrop-filter: blur(3px); 
 
 @media (max-width: 640px) {
   .nav-links a:not(.btn) { display: none; }
+  .nav-links { gap: 8px; }
+  .site-header .btn-sm { padding: 8px 12px; }
+  .account-btn[data-status]:not([data-status="signed-out"]) #accountBtnLabel {
+    position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+  }
   .hero { padding-top: 56px; }
   section { padding: 56px 0; }
+}
+
+@media (max-width: 400px) {
+  .hide-xs { display: none; }
 }
 
 @media (min-width: 900px) {

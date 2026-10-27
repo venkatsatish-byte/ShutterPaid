@@ -19,7 +19,8 @@
       <a class="brand" href="index.html"><img src="icons/icon.svg" alt="">ShutterPaid</a>
       <div class="nav-links">
         <button class="btn btn-sm btn-ghost" id="installBtn" hidden>Install</button>
-        <button class="btn btn-sm btn-primary" data-action="new-invoice">+ New invoice</button>
+        <button class="btn btn-sm btn-ghost account-btn" id="accountBtn" hidden><span class="sync-dot" aria-hidden="true"></span><span id="accountBtnLabel">Sign in</span></button>
+        <button class="btn btn-sm btn-primary" data-action="new-invoice" aria-label="New invoice">+ New<span class="hide-xs"> invoice</span></button>
       </div>
     </div>
   </header>
@@ -69,6 +70,23 @@
     <section class="view" id="view-settings" hidden>
       <h1>Settings</h1>
       <p class="sub">These details appear in your reminder emails.</p>
+
+      <div class="panel" style="padding:20px" id="accountPanel" hidden>
+        <h2 style="margin:0 0 6px;font-size:1.05rem">☁️ Account &amp; sync</h2>
+        <div id="accountSignedOut">
+          <p class="sub" style="margin-bottom:16px">Sign in to back up your invoices and use them on all your devices. Without an account, everything stays on this device.</p>
+          <button class="btn btn-sm btn-primary" id="openAuthBtn">Sign in or create an account</button>
+        </div>
+        <div id="accountSignedIn" hidden>
+          <p style="margin:0 0 4px">Signed in as <strong id="accountEmail"></strong></p>
+          <p class="sub" style="margin-bottom:16px" id="syncDetail" role="status" aria-live="polite"></p>
+          <div class="toolbar">
+            <button class="btn btn-sm" id="syncNowBtn">Sync now</button>
+            <button class="btn btn-sm btn-ghost" id="signOutBtn">Sign out</button>
+          </div>
+        </div>
+      </div>
+
       <div class="panel" style="padding:20px">
         <form class="form" id="settingsForm">
           <div class="form-row">
@@ -100,7 +118,7 @@
 
       <div class="panel" style="padding:20px">
         <h2 style="margin:0 0 6px;font-size:1.05rem">💾 Backup</h2>
-        <p class="sub" style="margin-bottom:16px">Your data is stored only on this device. Export a backup to keep it safe or move it to another device.</p>
+        <p class="sub" style="margin-bottom:16px" id="backupNote">Your data is stored only on this device. Export a backup to keep it safe or move it to another device.</p>
         <div class="toolbar">
           <button class="btn btn-sm" id="exportBtn">Export backup</button>
           <label class="btn btn-sm" style="display:inline-flex">Import backup<input type="file" id="importInput" accept="application/json" hidden></label>
@@ -172,8 +190,51 @@
     </div>
   </dialog>
 
+  <!-- Sign-in dialog -->
+  <dialog id="authDialog" aria-labelledby="authTitle">
+    <div class="dialog-inner">
+      <h2 id="authTitle">Sign in to sync</h2>
+      <p class="sub">Use the same email on each device. New here? Signing in creates your account.</p>
+      <div id="authStepEmail" class="form">
+        <button class="btn" id="authGoogle" type="button"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3 0 5.8 1.1 7.9 3l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="m6.3 14.7 6.6 4.8C14.7 15.1 19 12 24 12c3 0 5.8 1.1 7.9 3l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>Continue with Google</button>
+        <div class="divider"><span>or</span></div>
+        <form class="form" id="authEmailForm">
+          <label>Email<input id="authEmailInput" type="email" autocomplete="email" required placeholder="you@studio.com"></label>
+          <button class="btn btn-primary" id="authEmailBtn" type="submit">Email me a sign-in link</button>
+        </form>
+      </div>
+      <div id="authStepCode" class="form" hidden>
+        <p style="margin:0">We sent a sign-in link and a 6-digit code to <strong id="authSentTo"></strong>. Open the link on this device, or enter the code here. Using the app from your home screen? Enter the code.</p>
+        <form class="form" id="authCodeForm">
+          <label>Code<input id="authCodeInput" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{6,10}" maxlength="10" required placeholder="123456"></label>
+          <button class="btn btn-primary" type="submit">Sign in</button>
+        </form>
+        <button class="btn btn-sm btn-ghost" id="authBack" type="button">Use a different email</button>
+      </div>
+      <p class="form-error" id="authError" role="alert"></p>
+      <div class="dialog-actions">
+        <button class="btn btn-ghost" id="authClose" type="button">Not now</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- First sign-in upload dialog -->
+  <dialog id="uploadDialog" aria-labelledby="uploadTitle">
+    <div class="dialog-inner">
+      <h2 id="uploadTitle">Add this device's data to your account?</h2>
+      <p id="uploadText"></p>
+      <div class="dialog-actions">
+        <button class="btn btn-ghost" id="uploadSkip">Not now</button>
+        <button class="btn btn-primary" id="uploadGo">Add to my account</button>
+      </div>
+    </div>
+  </dialog>
+
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
+  <script src="js/config.js"></script>
+  <script src="js/core.js"></script>
+  <script src="js/cloud.js"></script>
   <script src="js/pwa.js"></script>
   <script src="js/app.js"></script>
 </body>

@@ -8,6 +8,7 @@ ShutterPaid is an invoice reminder app for photographers. It runs as a website a
 - **Dashboard** that shows outstanding, overdue, due-soon and paid-this-month totals, plus a list of who needs a reminder today
 - **Invoices** with the client, shoot type, invoice number, amount, currency, shoot date and due date. You can search and filter them, and mark them paid or unpaid.
 - **Reminder emails** in three tones (Friendly, Firm and Final notice). Each one is filled in with the client's details and your payment link. Send it through your email app or copy the text for WhatsApp or SMS. Every reminder you send is logged.
+- **Automatic reminders** (signed in): turn them on per invoice and ShutterPaid emails the client on a schedule, by default friendly 3 days before the due date, friendly on the due date, firm 7 days after and final 21 days after. Edit the default in Settings or set a custom schedule per invoice. Emails go out at your chosen hour in your time zone, from your name, with replies going to you. Reminders stop when the invoice is marked paid, and every email has a link the client can use to stop them. Each invoice shows its reminder history and the next scheduled reminder.
 - **Accounts and cloud sync** (optional): sign in with an email link/code or Google to sync invoices and settings across devices. Changes are saved on the device first and upload when you're online.
 - **Local-only mode**: without signing in, everything stays in the browser's `localStorage`, exactly as before.
 - **Settings** for your name, business, currency, payment link and email signature
@@ -53,7 +54,38 @@ Supabase's built-in email sender is rate-limited and meant for testing. Before l
 
 **Google.** In Google Cloud Console, create an OAuth client (type *Web application*). Add `https://<your-project-ref>.supabase.co/auth/v1/callback` as an authorised redirect URI. Then paste the client ID and secret into **Authentication → Providers → Google** in Supabase and enable it.
 
-### 3. Deploy (Vercel or Netlify)
+### 3. Automatic reminders (Resend + Edge Functions)
+1. **Resend.** Create an account at [resend.com](https://resend.com), add a sending domain (a subdomain such as `mail.your-domain.com` keeps your main domain's reputation separate), and add the DNS records Resend shows (SPF, DKIM and, ideally, DMARC). Create an API key with sending access.
+2. **Function secrets.** Copy the server-only part of `.env.example` to `supabase/.env.functions` (git-ignored), fill it in, then:
+   ```bash
+   npx supabase secrets set --env-file supabase/.env.functions
+   ```
+3. **Deploy the functions** (their `verify_jwt = false` setting is in `supabase/config.toml`):
+   ```bash
+   npx supabase functions deploy send-reminders
+   npx supabase functions deploy stop-reminders
+   ```
+4. **Apply the migrations** (`npx supabase db push`, or run the new files in the SQL Editor in order). The schedule migration enables `pg_cron` and `pg_net` and runs `send-reminders` every hour.
+5. **Give the cron job its URL and secret** (once, in the SQL Editor; values never touch the repo):
+   ```sql
+   select vault.create_secret('https://<project-ref>.supabase.co', 'project_url');
+   select vault.create_secret('<your CRON_SECRET>', 'cron_secret');
+   ```
+6. **Check it** without sending anything:
+   ```bash
+   curl -X POST 'https://<project-ref>.supabase.co/functions/v1/send-reminders?dry=1' -H "Authorization: Bearer <CRON_SECRET>"
+   ```
+   The response lists what would be sent and why other invoices were skipped. Run history is under **Integrations → Cron** in the dashboard, and function logs are under **Edge Functions → send-reminders → Logs**.
+
+**How sending stays safe**
+- *Once per step.* `reminder_log` has a unique index on (invoice, scheduled date, step). Before emailing, the function calls `claim_auto_reminder`, which re-checks the invoice (unpaid, auto on, not stopped) and creates that row in the same transaction. Two runs at once, or a retry, can't both claim it. The row id is also sent to Resend as the `Idempotency-Key`, so a retry after a crash can't produce a second email.
+- *Once per day per invoice*, whatever the schedule says, and no catch-up bursts: if several steps are overdue (for example, auto-reminders turned on for an old invoice), only the latest is sent. A step missed because of an outage still goes out up to 3 days late.
+- *Failures* are recorded on the log row (shown in the app's history) and retried on the next hourly run, up to 3 attempts.
+- *Local time.* The job runs hourly so each photographer's reminders go out after their send hour in their own time zone (set in Settings → Automatic reminders).
+- *Stopping.* Each invoice has a secret token that the browser can't read. The email footer links to `stop.html?t=…`, and mail apps' built-in unsubscribe button uses the RFC 8058 one-click header. Both call `stop-reminders`. Only the server can set or clear "stopped".
+- *Before sending*, the function checks there's a business or owner name (every email names the business) and a valid client email.
+
+### 4. Deploy (Vercel or Netlify)
 Both configs are included (`vercel.json`, `netlify.toml`). They run `node scripts/build.mjs`, which:
 - writes `js/config.js` from the `SUPABASE_URL` and `SUPABASE_ANON_KEY` environment variables, and
 - stamps the service worker cache name with the commit, so every deploy reaches users.
@@ -69,7 +101,7 @@ GitHub Pages still works, but only in local-only mode (it has no build step to w
 ## Secrets
 - Never commit `.env` or `js/config.js` (both are git-ignored). `.env.example` lists every variable.
 - Browser-safe values (Supabase URL and anon key) are set as host environment variables.
-- Server secrets for later phases (Resend, Stripe) are set with `npx supabase secrets set NAME=value` and are only read by Edge Functions.
+- Server secrets (Resend, cron, and later Stripe) are set with `npx supabase secrets set` and are only read by Edge Functions. The cron job reads its URL and secret from Supabase Vault.
 
 ## How sync works
 - Signed out: data lives under `shutterpaid:data:v1` in `localStorage`, as before.
@@ -82,11 +114,13 @@ The service worker pre-caches the app for offline use. When a new version is dep
 
 ## Tests
 ```bash
-npm test             # unit tests for dates, due status, upload de-duplication and sync merging (no install needed)
+npm test             # unit tests: dates, due status, sync merging, the reminder scheduler and the send run (no install needed)
 npm i -D playwright && npx playwright install chromium
-npm run test:e2e     # browser tests: local-only mode, sign-in, upload, offline queue, RLS-style isolation, update prompt
+npm run test:e2e     # browser tests: local-only mode, sign-in, upload, offline queue, update prompt, reminder settings, stop page
 ```
 The browser tests use an in-page fake of Supabase (`tests/e2e/fake-supabase.js`), so they need no real project.
+
+`js/schedule.js` (schedule rules and email copy) is shared by the app and the Edge Function. The function's copy lives in `supabase/functions/_shared/schedule.js`; after editing the original, run `npm run sync-shared`. A unit test fails if the two differ.
 
 ## Install as an app
 - **Android / Chrome / Edge:** click **Install** in the header, or use the browser menu and choose *Install app*.
@@ -98,12 +132,15 @@ index.html             Marketing landing page
 app.html               The app (dashboard, invoices, settings, sign-in)
 css/styles.css         Shared styles (automatic light and dark mode)
 js/core.js             Pure logic (dates, status, sync helpers), shared with the tests
+js/schedule.js         Reminder schedule rules and email copy (shared with the Edge Function)
 js/cloud.js            Supabase auth and the offline sync queue
 js/app.js              App UI and local cache
 js/pwa.js              Service worker registration, update prompt, install button
 js/config.js           Generated at deploy from env vars (not committed)
+stop.html              Page where clients stop reminders for an invoice
 sw.js                  Offline cache
-supabase/migrations/   Database schema and Row Level Security
+supabase/migrations/   Database schema, Row Level Security, reminder claiming, hourly cron
+supabase/functions/    Edge Functions: send-reminders, stop-reminders
 scripts/build.mjs      Deploy step: writes js/config.js, versions the service worker
 tests/                 Unit tests (node:test) and browser tests (Playwright)
 manifest.webmanifest   PWA manifest
@@ -111,7 +148,6 @@ icons/                 App icons (SVG + PNG + maskable)
 ```
 
 ## Roadmap
-- Automatic scheduled reminders sent through Resend
 - Pro plan with Stripe subscriptions
 - PDF invoice generation
 - Stripe payment links created per invoice

@@ -4,6 +4,8 @@
 !.env.example
 js/config.js
 supabase/.temp/
+supabase/.env.functions
+supabase/functions/.env
 supabase/.branches/
 
 node_modules/

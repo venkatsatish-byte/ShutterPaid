@@ -6,6 +6,7 @@
 
   const Core = window.SPCore;
   const Cloud = window.SPCloud;
+  const Sched = window.SPSchedule;
   const LOCAL_KEY = 'shutterpaid:data:v1';
 
   const defaultSettings = {
@@ -15,7 +16,10 @@
     soonDays: 3,
     paymentLink: '',
     signature: '',
-    timeZone: deviceTimeZone()
+    timeZone: deviceTimeZone(),
+    reminderSchedule: Sched.DEFAULT_SCHEDULE.map((x) => Object.assign({}, x)),
+    sendHour: Sched.DEFAULT_SEND_HOUR,
+    replyTo: ''
   };
 
   function deviceTimeZone() {
@@ -185,7 +189,8 @@
   // ---------- Rendering ----------
   function invoiceItem(inv, opts) {
     const st = statusOf(inv);
-    const last = inv.reminders && inv.reminders.length ? inv.reminders[inv.reminders.length - 1] : null;
+    const delivered = (inv.reminders || []).filter(Core.isDelivered);
+    const last = delivered.length ? delivered[delivered.length - 1] : null;
     const meta = [
       esc(inv.shootType),
       inv.number ? esc(inv.number) : '',
@@ -205,12 +210,112 @@
       actions.push('<button class="btn btn-sm btn-ghost btn-danger" data-act="delete" data-id="' + esc(inv.id) + '">Delete</button>');
     }
 
+    const auto = autoStatus(inv);
+    const history = (!opts || !opts.compact) && inv.reminders && inv.reminders.length ? reminderHistory(inv) : '';
+
     return '<li class="item">' +
-      '<div><div class="item-title">' + esc(inv.clientName) + '</div><div class="item-meta">' + meta + '</div></div>' +
+      '<div><div class="item-title">' + esc(inv.clientName) + '</div><div class="item-meta">' + meta + '</div>' +
+      (auto ? '<div class="item-auto ' + auto.cls + '">' + esc(auto.text) + '</div>' : '') + '</div>' +
       '<div class="item-amount">' + BADGES[st] + '<div>' + money(inv.amount, inv.currency) + '</div></div>' +
       '<div class="item-actions">' + actions.join('') + '</div>' +
+      history +
       '</li>';
   }
+
+  // ---------- Automatic reminders (display) ----------
+  function localToday() {
+    return Sched.localNow(new Date(), state.settings.timeZone).date;
+  }
+
+  function sentAutoKeys(inv) {
+    return new Set((inv.reminders || [])
+      .filter((r) => r.channel === 'auto' && r.status === 'sent')
+      .map((r) => r.scheduledFor + '|' + r.stepOffset));
+  }
+
+  function autoStatus(inv) {
+    if (!inv.autoRemind || !userId()) return null;
+    if (inv.paid) return null;
+    if (inv.remindersStoppedAt) return { cls: 'warn', text: '⏸ The client asked to stop automatic reminders for this invoice' };
+    if (!inv.clientEmail) return { cls: 'warn', text: '⚠️ Add the client\'s email to send automatic reminders' };
+    if (!state.settings.businessName && !state.settings.ownerName) return { cls: 'warn', text: '⚠️ Add your business name in Settings to send automatic reminders' };
+    const next = Sched.nextStep(inv, Sched.scheduleFor(inv, state.settings.reminderSchedule), localToday(), sentAutoKeys(inv));
+    if (!next) return { cls: '', text: '🤖 Auto reminders on · all scheduled reminders sent' };
+    const when = next.date === localToday() ? 'today' : prettyDate(next.date);
+    return { cls: 'on', text: '🤖 Next auto reminder: ' + Sched.TONE_LABELS[next.step.tone] + ', ' + when };
+  }
+
+  const CHANNEL_LABELS = { email: 'opened in your email app', copy: 'copied', auto: 'sent automatically' };
+
+  function reminderHistory(inv) {
+    const items = inv.reminders.slice().reverse().map((r) => {
+      let how = CHANNEL_LABELS[r.channel] || r.channel;
+      let cls = '';
+      if (r.channel === 'auto' && r.status === 'failed') { how = 'automatic send failed'; cls = 'failed'; }
+      if (r.channel === 'auto' && r.status === 'sending') how = 'sending…';
+      return '<li>' + esc(prettyDate(r.date)) + ' · ' + esc(Sched.TONE_LABELS[r.tone] || r.tone) + ' · <span class="' + cls + '">' + esc(how) + '</span></li>';
+    }).join('');
+    return '<details class="history"><summary>Reminder history (' + inv.reminders.length + ')</summary><ul>' + items + '</ul></details>';
+  }
+
+  // ---------- Schedule editor ----------
+  function scheduleRow(step) {
+    const when = step.offset < 0 ? 'before' : step.offset > 0 ? 'after' : 'on';
+    const tones = Sched.TONES.map((t) => '<option value="' + t + '"' + (t === step.tone ? ' selected' : '') + '>' + esc(Sched.TONE_LABELS[t]) + '</option>').join('');
+    const whens = [['before', 'days before due'], ['on', 'on the due date'], ['after', 'days after due']]
+      .map((w) => '<option value="' + w[0] + '"' + (w[0] === when ? ' selected' : '') + '>' + w[1] + '</option>').join('');
+    return '<div class="sched-row">' +
+      '<select data-k="tone" aria-label="Tone">' + tones + '</select>' +
+      '<input data-k="days" type="number" min="1" max="365" inputmode="numeric" aria-label="Days" value="' + Math.abs(step.offset) + '"' + (when === 'on' ? ' disabled' : '') + '>' +
+      '<select data-k="when" aria-label="When">' + whens + '</select>' +
+      '<button type="button" class="btn btn-sm btn-ghost" data-k="remove" aria-label="Remove this step">✕</button>' +
+      '</div>';
+  }
+
+  function renderScheduleEditor(el, steps) {
+    el.innerHTML = steps.map(scheduleRow).join('') +
+      '<div><button type="button" class="btn btn-sm" data-k="add">+ Add a reminder</button></div>';
+  }
+
+  function readScheduleEditor(el) {
+    const steps = $$('.sched-row', el).map((row) => {
+      const when = $('[data-k=when]', row).value;
+      const days = Math.max(1, Math.round(Number($('[data-k=days]', row).value) || 1));
+      return { tone: $('[data-k=tone]', row).value, offset: when === 'on' ? 0 : when === 'before' ? -days : days };
+    });
+    return Sched.normalizeSchedule(steps, []);
+  }
+
+  // One handler for every schedule editor on the page.
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('.schedule-editor [data-k]');
+    if (!btn || btn.tagName !== 'BUTTON') return;
+    const el = btn.closest('.schedule-editor');
+    const steps = readScheduleEditor(el);
+    if (btn.dataset.k === 'remove') {
+      const row = btn.closest('.sched-row');
+      const i = $$('.sched-row', el).indexOf(row);
+      const all = $$('.sched-row', el);
+      row.remove();
+      const focus = all[i + 1] || all[i - 1];
+      (focus ? $('[data-k=tone]', focus) : $('[data-k=add]', el)).focus();
+      return;
+    }
+    if (steps.length >= Sched.MAX_STEPS) return toast('Up to ' + Sched.MAX_STEPS + ' reminders per schedule');
+    const last = steps.length ? steps[steps.length - 1].offset : -1;
+    steps.push({ offset: Math.min(365, last + 7), tone: last >= 7 ? 'final' : 'firm' });
+    renderScheduleEditor(el, steps);
+    const rows = $$('.sched-row', el);
+    $('[data-k=tone]', rows[rows.length - 1]).focus();
+  });
+
+  document.addEventListener('change', (e) => {
+    if (e.target.matches('.schedule-editor [data-k=when]')) {
+      const days = $('[data-k=days]', e.target.closest('.sched-row'));
+      days.disabled = e.target.value === 'on';
+      if (e.target.value !== 'on' && Number(days.value) < 1) days.value = 3;
+    }
+  });
 
   function renderDashboard() {
     const s = state.settings;
@@ -268,7 +373,53 @@
     Object.keys(defaultSettings).forEach((k) => {
       if (f.elements[k]) f.elements[k].value = state.settings[k];
     });
+    renderAutoSettings();
   }
+
+  function renderAutoSettings() {
+    const panel = $('#autoPanel');
+    panel.hidden = !Cloud.enabled;
+    if (!Cloud.enabled) return;
+    const a = $('#autoForm');
+    const hours = $('#sendHourSelect');
+    if (!hours.options.length) {
+      for (let h = 5; h <= 21; h++) {
+        const label = new Date(2000, 0, 1, h).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+        hours.add(new Option(label, String(h)));
+      }
+      const zones = typeof Intl.supportedValuesOf === 'function' ? Intl.supportedValuesOf('timeZone') : [];
+      $('#tzList').innerHTML = zones.map((z) => '<option value="' + esc(z) + '">').join('');
+    }
+    hours.value = String(state.settings.sendHour);
+    a.elements.timeZone.value = state.settings.timeZone || deviceTimeZone();
+    a.elements.replyTo.value = state.settings.replyTo || '';
+    renderScheduleEditor($('#defaultSchedule'), Sched.normalizeSchedule(state.settings.reminderSchedule));
+    const signedIn = !!userId();
+    $('#autoPanelNote').textContent = signedIn
+      ? 'ShutterPaid emails your clients for you on this schedule. Turn it on for each invoice. Reminders stop as soon as an invoice is marked paid.'
+      : 'Sign in to have ShutterPaid email your clients for you on a schedule. Without an account you can still send each reminder yourself.';
+  }
+
+  $('#autoForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const f = e.target.elements;
+    const steps = readScheduleEditor($('#defaultSchedule'));
+    if (!steps.length) return toast('Add at least one reminder to the schedule');
+    const tz = f.timeZone.value.trim();
+    if (!Sched.validTimeZone(tz)) {
+      f.timeZone.focus();
+      return toast('Pick a time zone from the list, like Europe/London');
+    }
+    state.settings.reminderSchedule = steps;
+    state.settings.sendHour = Number(f.sendHour.value);
+    state.settings.timeZone = tz;
+    state.settings.replyTo = f.replyTo.value.trim();
+    save();
+    queueSettings();
+    renderAll();
+    renderAutoSettings();
+    toast('Reminder settings saved');
+  });
 
   function renderAll() {
     renderDashboard();
@@ -358,8 +509,41 @@
     f.shootDate.value = inv ? inv.shootDate || '' : todayISO();
     f.dueDate.value = inv ? inv.dueDate : addDays(todayISO(), 14);
     f.notes.value = inv ? inv.notes || '' : '';
+    renderInvoiceAuto(inv);
     invoiceDialog.showModal();
   }
+
+  function renderInvoiceAuto(inv) {
+    const box = $('#invoiceAuto');
+    box.hidden = !Cloud.enabled;
+    if (!Cloud.enabled) return;
+    const signedIn = !!userId();
+    const input = $('#autoRemindInput');
+    input.checked = signedIn && !!(inv ? inv.autoRemind : false);
+    input.disabled = !signedIn || !!(inv && inv.remindersStoppedAt);
+    const custom = inv && inv.reminderSchedule;
+    $('#customScheduleInput').checked = !!custom;
+    $('#customScheduleDetails').open = !!custom;
+    renderScheduleEditor($('#invoiceSchedule'), Sched.normalizeSchedule(custom || state.settings.reminderSchedule));
+    updateInvoiceAutoHint(inv);
+  }
+
+  function updateInvoiceAutoHint(inv) {
+    const signedIn = !!userId();
+    const custom = $('#customScheduleInput').checked;
+    $('#invoiceSchedule').setAttribute('aria-disabled', String(!custom));
+    $$('#invoiceSchedule input, #invoiceSchedule select, #invoiceSchedule button').forEach((el) => {
+      el.disabled = !custom || (el.dataset.k === 'days' && $('[data-k=when]', el.closest('.sched-row')).value === 'on');
+    });
+    let hint;
+    if (!signedIn) hint = 'Sign in to have ShutterPaid send reminders for you.';
+    else if (inv && inv.remindersStoppedAt) hint = 'The client asked to stop automatic reminders for this invoice. You can still send reminders yourself.';
+    else hint = 'Schedule: ' + Sched.normalizeSchedule(custom ? readScheduleEditor($('#invoiceSchedule')) : state.settings.reminderSchedule).map(Sched.describeStep).join(', ') + '.';
+    $('#autoRemindHint').textContent = hint;
+  }
+
+  $('#customScheduleInput').addEventListener('change', () => updateInvoiceAutoHint(state.invoices.find((i) => i.id === invoiceForm.elements.id.value)));
+  $('#invoiceSchedule').addEventListener('change', () => updateInvoiceAutoHint(state.invoices.find((i) => i.id === invoiceForm.elements.id.value)));
 
   invoiceForm.addEventListener('submit', (e) => {
     if (!e.submitter || e.submitter.value !== 'save') return;
@@ -376,6 +560,17 @@
       notes: f.notes.value.trim()
     };
     const existing = state.invoices.find((i) => i.id === f.id.value);
+    if (Cloud.enabled && userId()) {
+      data.autoRemind = $('#autoRemindInput').checked;
+      const custom = $('#customScheduleInput').checked ? readScheduleEditor($('#invoiceSchedule')) : [];
+      data.reminderSchedule = custom.length ? custom : null;
+      if (data.autoRemind && !data.clientEmail) {
+        e.preventDefault();
+        toast('Add the client\'s email to send automatic reminders');
+        f.clientEmail.focus();
+        return;
+      }
+    }
     if (existing) {
       Object.assign(existing, data);
       putInvoice(existing);
@@ -383,6 +578,9 @@
     } else {
       putInvoice(Object.assign({ id: uid(), paid: false, paidDate: '', reminders: [], createdAt: todayISO() }, data));
       toast('Invoice added 📸');
+    }
+    if (data.autoRemind && !state.settings.businessName && !state.settings.ownerName) {
+      setTimeout(() => toast('Add your business name in Settings so reminders can go out'), 2500);
     }
     renderAll();
   });
@@ -432,47 +630,7 @@
   }
 
   function buildReminder(inv, tone) {
-    const s = state.settings;
-    const first = (inv.clientName || '').split(/\s|&/)[0] || 'there';
-    const amount = money(inv.amount, inv.currency);
-    const ref = inv.number ? ' (' + inv.number + ')' : '';
-    const shoot = inv.shootType ? inv.shootType.toLowerCase() + ' session' : 'session';
-    const due = prettyDate(inv.dueDate);
-    const n = daysUntil(inv.dueDate);
-    const pay = s.paymentLink ? '\n\nYou can pay quickly and securely here:\n' + s.paymentLink : '';
-    const sig = '\n\n' + (s.signature || [s.ownerName, s.businessName].filter(Boolean).join('\n') || 'Thank you!');
-    const biz = s.businessName ? ' from ' + s.businessName : '';
-
-    const dueText = n > 0 ? 'is due on ' + due : n === 0 ? 'is due today' : 'was due on ' + due;
-
-    if (tone === 'firm') {
-      return {
-        subject: 'Payment overdue: invoice' + ref + ' for ' + amount,
-        body: 'Hi ' + first + ',\n\n' +
-          'I\'m following up on the invoice' + ref + ' for your ' + shoot + '. The balance of ' + amount + ' ' + dueText +
-          ', and I haven\'t received payment yet.\n\n' +
-          'Please arrange payment within the next 7 days. If you\'ve already sent it, please let me know so I can update my records.' +
-          pay + sig
-      };
-    }
-    if (tone === 'final') {
-      return {
-        subject: 'Final notice: invoice' + ref + ' for ' + amount,
-        body: 'Hi ' + first + ',\n\n' +
-          'This is a final reminder that the invoice' + ref + ' for your ' + shoot + ', totalling ' + amount + ', ' + dueText +
-          ' and is still unpaid.\n\n' +
-          'Please settle the balance within 5 business days. After that I may need to apply late fees or take further steps, as set out in our agreement. ' +
-          'I\'d much rather sort this out together, so please reply if anything is holding up the payment.' +
-          pay + sig
-      };
-    }
-    return {
-      subject: 'Friendly reminder: invoice' + ref + biz,
-      body: 'Hi ' + first + ',\n\n' +
-        'I hope you\'re loving your photos! 📸 Just a friendly reminder that the invoice' + ref + ' for your ' + shoot +
-        ' (' + amount + ') ' + dueText + '.' + pay +
-        '\n\nIf you\'ve already paid, thank you, and please ignore this note.' + sig
-    };
+    return Sched.buildReminder(inv, state.settings, tone, todayISO());
   }
 
   function fillReminder() {
@@ -535,7 +693,8 @@
     e.preventDefault();
     const f = e.target.elements;
     Object.keys(defaultSettings).forEach((k) => {
-      if (f[k]) state.settings[k] = k === 'soonDays' ? Math.min(30, Math.max(0, Number(f[k].value) || 0)) : f[k].value.trim();
+      if (!f[k]) return;
+      state.settings[k] = k === 'soonDays' ? Math.min(30, Math.max(0, Number(f[k].value) || 0)) : f[k].value.trim();
     });
     if (!state.settings.timeZone) state.settings.timeZone = deviceTimeZone();
     save();
@@ -773,7 +932,7 @@
   function onUser(u) {
     useStore();
     renderAll();
-    if (currentView === 'settings') renderSettings();
+    renderSettings();
     if (u) maybeOfferUpload(u);
   }
 
@@ -790,7 +949,8 @@
     save();
     renderAll();
     // Don't overwrite the settings form while someone is typing in it.
-    if (currentView === 'settings' && !$('#settingsForm').contains(document.activeElement)) renderSettings();
+    const editing = $('#settingsForm').contains(document.activeElement) || $('#autoForm').contains(document.activeElement);
+    if (currentView === 'settings' && !editing) renderSettings();
   }
 
   function onStatus(i) {

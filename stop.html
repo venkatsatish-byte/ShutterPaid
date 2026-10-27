@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Stop payment reminders · ShutterPaid</title>
+  <meta name="robots" content="noindex">
+  <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" content="#0f1020">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <main class="container" style="max-width:560px;padding:56px 0">
+    <div class="panel" style="padding:28px">
+      <h1 style="margin:0 0 12px;font-size:1.5rem" id="stopTitle">Stop payment reminders?</h1>
+      <p class="sub" id="stopText" style="margin:0 0 20px">You'll stop getting automatic reminder emails about this invoice. The invoice itself doesn't change, and your photographer can still contact you directly.</p>
+      <button class="btn btn-primary" id="stopBtn" type="button">Stop reminders</button>
+      <p class="form-error" id="stopError" role="alert"></p>
+    </div>
+    <p class="sub" style="text-align:center;font-size:0.85rem;margin-top:20px">Reminders are sent by ShutterPaid on behalf of your photographer.</p>
+  </main>
+  <script src="js/config.js"></script>
+  <script>
+    (function () {
+      var token = new URLSearchParams(location.search).get('t') || '';
+      var cfg = window.SP_CONFIG || {};
+      var btn = document.getElementById('stopBtn');
+      var err = document.getElementById('stopError');
+      // Keep the token out of history and any later Referer header.
+      if (token) history.replaceState(null, '', location.pathname);
+      if (!token || !cfg.supabaseUrl) {
+        btn.hidden = true;
+        err.textContent = 'This link is incomplete. Please use the link from the reminder email, or reply to the email instead.';
+        return;
+      }
+      btn.addEventListener('click', function () {
+        btn.disabled = true;
+        err.textContent = '';
+        fetch(cfg.supabaseUrl + '/functions/v1/stop-reminders', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: token })
+        }).then(function (res) {
+          return res.json().catch(function () { return {}; }).then(function (body) { return { ok: res.ok, status: res.status, body: body }; });
+        }).then(function (r) {
+          if (!r.ok) {
+            btn.disabled = false;
+            err.textContent = r.status === 404 || r.status === 400
+              ? 'We couldn’t find this invoice. It may have been removed. You can reply to the reminder email instead.'
+              : 'Something went wrong. Please try again in a minute.';
+            return;
+          }
+          document.getElementById('stopTitle').textContent = 'Reminders stopped';
+          document.getElementById('stopText').textContent = (r.body.business || 'Your photographer') +
+            ' won’t send you any more automatic reminders about this invoice.';
+          btn.hidden = true;
+        }).catch(function () {
+          btn.disabled = false;
+          err.textContent = 'You seem to be offline. Please try again.';
+        });
+      });
+    })();
+  </script>
+</body>
+</html>

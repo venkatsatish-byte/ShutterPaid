@@ -5,6 +5,7 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "test": "node --test tests/*.test.js",
-    "test:e2e": "node tests/e2e/app.e2e.js"
+    "test:e2e": "node tests/e2e/run.js",
+    "sync-shared": "cp js/schedule.js supabase/functions/_shared/schedule.js"
   }
 }

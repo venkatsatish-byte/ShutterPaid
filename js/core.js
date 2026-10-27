@@ -58,9 +58,14 @@
     return 'Overdue by ' + Math.abs(n) + ' days';
   }
 
+  // Failed or still-sending automatic emails don't count as a reminder the client received.
+  function isDelivered(r) {
+    return !r.status || r.status === 'sent';
+  }
+
   function suggestedTone(inv, today) {
     const n = daysUntil(inv.dueDate, today);
-    const sent = (inv.reminders || []).length;
+    const sent = (inv.reminders || []).filter(isDelivered).length;
     if (n < -21 && sent >= 2) return 'final';
     if (n < -7 || (n < 0 && sent >= 1)) return 'firm';
     return 'friendly';
@@ -122,6 +127,11 @@
     return { upload, skipped };
   }
 
+  // Settings values can be arrays (the reminder schedule), so compare by value.
+  function same(a, b) {
+    return a === b || JSON.stringify(a) === JSON.stringify(b);
+  }
+
   // Fill blank account settings from this device's settings; never overwrite what the account has.
   function mergeSettingsForUpload(local, remote, defaults) {
     const out = Object.assign({}, defaults, remote);
@@ -132,7 +142,7 @@
       const remoteBlank = r === undefined || r === null || r === '';
       const localBlank = l === undefined || l === null || l === '';
       // Take the device value if the account has nothing, or still has the default and the device doesn't.
-      if (!localBlank && (remoteBlank || (r === defaults[k] && l !== defaults[k]))) {
+      if (!localBlank && (remoteBlank || (same(r, defaults[k]) && !same(l, defaults[k])))) {
         out[k] = l;
         changed = true;
       }
@@ -142,7 +152,7 @@
 
   function hasLocalData(data, defaults) {
     if (data.invoices && data.invoices.length) return true;
-    return Object.keys(defaults).some((k) => k !== 'timeZone' && data.settings && data.settings[k] !== defaults[k] && data.settings[k] !== '');
+    return Object.keys(defaults).some((k) => k !== 'timeZone' && data.settings && !same(data.settings[k], defaults[k]) && data.settings[k] !== '');
   }
 
   // ---------- Row mapping (app objects <-> Postgres rows) ----------
@@ -160,7 +170,9 @@
       due_date: inv.dueDate,
       notes: inv.notes || '',
       paid: !!inv.paid,
-      paid_date: inv.paid && inv.paidDate ? inv.paidDate : null
+      paid_date: inv.paid && inv.paidDate ? inv.paidDate : null,
+      auto_remind: !!inv.autoRemind,
+      reminder_schedule: inv.reminderSchedule || null
     };
   }
 
@@ -179,6 +191,9 @@
       paid: !!row.paid,
       paidDate: row.paid_date || '',
       createdAt: row.created_at || '',
+      autoRemind: !!row.auto_remind,
+      reminderSchedule: row.reminder_schedule || null,
+      remindersStoppedAt: row.reminders_stopped_at || '',
       reminders: reminders || []
     };
   }
@@ -196,8 +211,20 @@
   }
 
   function rowToReminder(row) {
-    return { id: row.id, date: row.sent_on, tone: row.tone, channel: row.channel, sentAt: row.sent_at || '' };
+    const r = { id: row.id, date: row.sent_on, tone: row.tone, channel: row.channel, sentAt: row.sent_at || '' };
+    if (row.channel === 'auto') {
+      r.status = row.status;
+      r.scheduledFor = row.scheduled_for;
+      r.stepOffset = row.step_offset;
+      if (row.error) r.error = row.error;
+    }
+    return r;
   }
+
+  // Explicit column lists: the browser isn't allowed to read server-only columns.
+  const INVOICE_COLUMNS = 'id,user_id,client_name,client_email,shoot_type,number,amount,currency,shoot_date,due_date,' +
+    'notes,paid,paid_date,created_at,updated_at,auto_remind,reminder_schedule,reminders_stopped_at';
+  const REMINDER_COLUMNS = 'id,invoice_id,sent_on,sent_at,tone,channel,status,scheduled_for,step_offset,error';
 
   const SETTINGS_COLUMNS = {
     ownerName: 'owner_name',
@@ -206,13 +233,16 @@
     soonDays: 'soon_days',
     paymentLink: 'payment_link',
     signature: 'signature',
-    timeZone: 'time_zone'
+    timeZone: 'time_zone',
+    reminderSchedule: 'reminder_schedule',
+    sendHour: 'send_hour',
+    replyTo: 'reply_to'
   };
 
   function settingsToRow(settings, userId) {
     const row = { id: userId };
     Object.keys(SETTINGS_COLUMNS).forEach((k) => {
-      if (settings[k] !== undefined) row[SETTINGS_COLUMNS[k]] = k === 'soonDays' ? Number(settings[k]) || 0 : settings[k];
+      if (settings[k] !== undefined) row[SETTINGS_COLUMNS[k]] = k === 'soonDays' || k === 'sendHour' ? Number(settings[k]) || 0 : settings[k];
     });
     return row;
   }
@@ -299,9 +329,10 @@
   return {
     DAY,
     toISO, todayISO, parseISO, addDays, daysBetween, daysUntil,
-    statusOf, relativeDue, suggestedTone,
+    statusOf, relativeDue, suggestedTone, isDelivered,
     isUuid, uuid, normalizeInvoice, fingerprint, planUpload, mergeSettingsForUpload, hasLocalData,
     invoiceToRow, rowToInvoice, reminderToRow, rowToReminder, settingsToRow, rowToSettings, assemble,
+    INVOICE_COLUMNS, REMINDER_COLUMNS,
     coalesceOps, pendingKeys, mergeRemote, isTransientError
   };
 });

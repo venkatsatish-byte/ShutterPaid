@@ -139,3 +139,19 @@ test('isTransientError', () => {
   assert.equal(C.isTransientError({ code: '42501' }), false);
   assert.equal(C.isTransientError({ code: '23514' }), false);
 });
+
+test('settings with array values compare by value', () => {
+  const sched = [{ offset: 0, tone: 'friendly' }];
+  const defaults = { ownerName: '', reminderSchedule: sched };
+  const fromJson = JSON.parse(JSON.stringify({ invoices: [], settings: { ownerName: '', reminderSchedule: sched } }));
+  assert.equal(C.hasLocalData(fromJson, defaults), false);
+  const custom = [{ offset: 5, tone: 'firm' }];
+  const m = C.mergeSettingsForUpload({ ownerName: '', reminderSchedule: custom }, { ownerName: 'A', reminderSchedule: JSON.parse(JSON.stringify(sched)) }, defaults);
+  assert.deepEqual(m.settings.reminderSchedule, custom);
+});
+
+test('failed automatic sends do not count towards the suggested tone', () => {
+  const failed = { id: C.uuid(), channel: 'auto', status: 'failed' };
+  assert.equal(C.suggestedTone(inv({ dueDate: '2026-03-08', reminders: [failed] }), TODAY), 'friendly');
+  assert.equal(C.suggestedTone(inv({ dueDate: '2026-03-08', reminders: [{ id: C.uuid(), channel: 'email' }] }), TODAY), 'firm');
+});

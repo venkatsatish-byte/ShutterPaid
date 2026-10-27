@@ -1,0 +1,11 @@
+# Supabase CLI settings for this project. Only the parts ShutterPaid relies on are listed;
+# everything else uses the CLI defaults.
+project_id = "shutterpaid"
+
+# Called by pg_cron with a shared secret (CRON_SECRET), not a user login.
+[functions.send-reminders]
+verify_jwt = false
+
+# Opened by clients from the link in a reminder email; they have no account.
+[functions.stop-reminders]
+verify_jwt = false

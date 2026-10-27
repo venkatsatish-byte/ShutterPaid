@@ -1,63 +1,12 @@
 // Browser tests for accounts, sync and app updates, against an in-page fake of Supabase.
 // Needs Playwright with Chromium:  npm i -D playwright && npx playwright install chromium
 // Run:  npm run test:e2e   (screenshots are written to tests/e2e/out/)
-const { chromium, devices } = require('playwright');
-const fs = require('fs');
-const http = require('http');
-const path = require('path');
-
-const ROOT = path.join(__dirname, '..', '..');
-const OUT = path.join(__dirname, 'out');
-const PORT = 8090, BASE = 'http://localhost:' + PORT + '/';
-const FAKE = fs.readFileSync(path.join(__dirname, 'fake-supabase.js'), 'utf8');
-const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json' };
-let swVersion = null; // when set, sw.js is served with this cache name to simulate a deploy
-
-const server = http.createServer((req, res) => {
-  let p = decodeURIComponent(new URL(req.url, BASE).pathname);
-  if (p.endsWith('/')) p += 'index.html';
-  const file = path.join(ROOT, path.normalize(p));
-  if (!file.startsWith(ROOT) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) { res.writeHead(404); return res.end(); }
-  let body = fs.readFileSync(file);
-  if (p === '/sw.js' && swVersion) body = body.toString().replace(/const CACHE = '[^']+'/, "const CACHE = '" + swVersion + "'");
-  res.writeHead(200, { 'Content-Type': TYPES[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-cache' });
-  res.end(body);
-});
+const { chromium } = require('playwright');
+const { BASE, OUT, state, start, ctx, ok, toastText, db, signIn, finish } = require('./harness');
 const SP = OUT;
-const CONFIG = 'window.SP_CONFIG={supabaseUrl:"https://fake.supabase.co",supabaseAnonKey:"anon"};';
-let failures = 0;
-const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) failures++; };
 
-async function ctx(browser, { cloud, mobile, scheme } = {}) {
-  const c = await browser.newContext(Object.assign({}, mobile ? devices['iPhone 13'] : {}, { colorScheme: scheme || 'dark', serviceWorkers: 'block' }));
-  await c.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: BASE }).catch(() => {});
-  await c.route('**/js/config.js', (r) => r.fulfill({ contentType: 'text/javascript', body: cloud ? CONFIG : 'window.SP_CONFIG={};' }));
-  await c.route('https://cdn.jsdelivr.net/**', (r) => r.fulfill({ contentType: 'text/javascript', body: FAKE }));
-  const page = await c.newPage();
-  page.errors = [];
-  page.on('pageerror', (e) => page.errors.push(e.message));
-  page.on('console', (m) => { if (m.type() === 'error') page.errors.push(m.text()); });
-  page.on('dialog', (d) => d.accept());
-  return { c, page };
-}
-const toastText = (p) => p.locator('#toast').textContent();
-const db = (p) => p.evaluate(() => JSON.parse(localStorage.getItem('__fakedb') || '{}'));
-
-async function signIn(page, email) {
-  await page.click('#accountBtn');
-  await page.fill('#authEmailInput', email);
-  await page.click('#authEmailBtn');
-  await page.fill('#authCodeInput', '000000');
-  await page.click('#authCodeForm button[type=submit]');
-  await page.waitForFunction(() => document.querySelector('#authError').textContent.length > 0);
-  ok(/didn.t work|invalid/i.test(await page.textContent('#authError')), 'wrong code shows an error');
-  await page.fill('#authCodeInput', '123456');
-  await page.click('#authCodeForm button[type=submit]');
-}
-
-(async () => {
-  fs.mkdirSync(OUT, { recursive: true });
-  await new Promise((r) => server.listen(PORT, r));
+module.exports = async function run() {
+  await start();
   const browser = await chromium.launch();
 
   // ---- A. Local-only mode still works exactly as before ----
@@ -203,7 +152,7 @@ async function signIn(page, email) {
   await page.evaluate(() => navigator.serviceWorker.ready);
   await page.reload();
   await page.waitForFunction(() => navigator.serviceWorker.controller);
-  swVersion = 'shutterpaid-next';
+  state.swVersion = 'shutterpaid-next';
   await page.reload();
   await page.waitForSelector('#updateBanner:not([hidden])', { timeout: 10000 });
   ok(true, 'update banner appears for a new service worker');
@@ -213,7 +162,6 @@ async function signIn(page, email) {
   await swc.close();
 
   await browser.close();
-  server.close();
-  console.log(failures ? failures + ' FAILED' : 'ALL PASSED');
-  process.exit(failures ? 1 : 0);
-})().catch((e) => { console.error(e); process.exit(1); });
+};
+
+if (require.main === module) module.exports().then(() => process.exit(finish() ? 1 : 0), (e) => { console.error(e); process.exit(1); });

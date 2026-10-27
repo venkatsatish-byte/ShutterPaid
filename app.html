@@ -116,6 +116,33 @@
         </form>
       </div>
 
+      <div class="panel" style="padding:20px" id="autoPanel" hidden>
+        <h2 style="margin:0 0 6px;font-size:1.05rem">⏰ Automatic reminders</h2>
+        <p class="sub" style="margin-bottom:16px" id="autoPanelNote">ShutterPaid emails your clients for you on this schedule. Turn it on for each invoice. Reminders stop as soon as an invoice is marked paid.</p>
+        <form class="form" id="autoForm">
+          <fieldset class="fieldset">
+            <legend>Default schedule</legend>
+            <div class="schedule-editor" id="defaultSchedule"></div>
+          </fieldset>
+          <div class="form-row">
+            <label>Send at
+              <select name="sendHour" id="sendHourSelect"></select>
+            </label>
+            <label>Time zone <span class="hint">Used to send at your local time</span>
+              <input name="timeZone" list="tzList" autocomplete="off" spellcheck="false" placeholder="Europe/London">
+            </label>
+          </div>
+          <datalist id="tzList"></datalist>
+          <label>Replies go to <span class="hint">Leave blank to use your sign-in email</span>
+            <input name="replyTo" type="email" placeholder="you@studio.com">
+          </label>
+          <p class="hint" style="margin:0">Emails are sent from your name, include your business name, and let the client stop reminders for that invoice.</p>
+          <div class="dialog-actions" style="justify-content:flex-start">
+            <button class="btn btn-primary" type="submit">Save reminder settings</button>
+          </div>
+        </form>
+      </div>
+
       <div class="panel" style="padding:20px">
         <h2 style="margin:0 0 6px;font-size:1.05rem">💾 Backup</h2>
         <p class="sub" style="margin-bottom:16px" id="backupNote">Your data is stored only on this device. Export a backup to keep it safe or move it to another device.</p>
@@ -162,6 +189,16 @@
         <label>Due date<input name="dueDate" type="date" required></label>
       </div>
       <label>Notes<textarea name="notes" placeholder="Deposit received, final gallery delivered on…"></textarea></label>
+      <fieldset class="fieldset" id="invoiceAuto" hidden>
+        <legend>Automatic reminders</legend>
+        <label class="check"><input type="checkbox" name="autoRemind" id="autoRemindInput"> Email this client automatically until the invoice is paid</label>
+        <p class="hint" id="autoRemindHint" style="margin:0"></p>
+        <details id="customScheduleDetails">
+          <summary>Use a different schedule for this invoice</summary>
+          <label class="check" style="margin-top:10px"><input type="checkbox" id="customScheduleInput"> Custom schedule</label>
+          <div class="schedule-editor" id="invoiceSchedule"></div>
+        </details>
+      </fieldset>
       <div class="dialog-actions">
         <button class="btn btn-ghost" value="cancel" formnovalidate>Cancel</button>
         <button class="btn btn-primary" value="save" id="saveInvoiceBtn">Save invoice</button>
@@ -234,6 +271,7 @@
 
   <script src="js/config.js"></script>
   <script src="js/core.js"></script>
+  <script src="js/schedule.js"></script>
   <script src="js/cloud.js"></script>
   <script src="js/pwa.js"></script>
   <script src="js/app.js"></script>

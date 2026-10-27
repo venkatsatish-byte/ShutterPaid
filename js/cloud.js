@@ -253,8 +253,8 @@
     const c = await ensureClient();
     if (!user) throw new Error('Not signed in');
     const [invoices, reminders, profile] = await Promise.all([
-      selectAll(c, 'invoices', '*'),
-      selectAll(c, 'reminder_log', 'id,invoice_id,sent_on,sent_at,tone,channel'),
+      selectAll(c, 'invoices', Core.INVOICE_COLUMNS),
+      selectAll(c, 'reminder_log', Core.REMINDER_COLUMNS),
       c.from('profiles').select('*').eq('id', user.id).maybeSingle()
     ]);
     if (profile.error) throw profile.error;

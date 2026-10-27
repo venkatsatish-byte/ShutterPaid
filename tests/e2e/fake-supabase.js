@@ -18,7 +18,7 @@
         if (token !== '123456') return { error: { message: 'Token has expired or is invalid' } };
         const id = email === 'b@x.com' ? '22222222-2222-4222-8222-222222222222' : '11111111-1111-4111-8111-111111111111';
         session = { user: { id, email } }; localStorage.setItem(SK, JSON.stringify(session));
-        const d = db(); if (!d.profiles.some((p) => p.id === id)) { d.profiles.push({ id, email, owner_name: '', business_name: '', currency: 'USD', soon_days: 3, payment_link: '', signature: '', time_zone: '' }); saveDb(d); }
+        const d = db(); if (!d.profiles.some((p) => p.id === id)) { d.profiles.push({ id, email, created_at: new Date().toISOString(), owner_name: '', business_name: '', currency: 'USD', soon_days: 3, payment_link: '', signature: '', time_zone: '' }); saveDb(d); }
         emit('SIGNED_IN'); return { error: null };
       },
       async signInWithOAuth() { return { error: { message: 'not in test' } }; },

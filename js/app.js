@@ -987,6 +987,7 @@
   function onRemote(remote) {
     const wasPro = isPro();
     if (remote.profile) state.plan = Core.planFromProfile(remote.profile);
+    trackSignup(remote.profile);
     if (isPro() && !wasPro) {
       // Just upgraded (or the plan loaded for the first time): send anything held back by the limit,
       // and offer device invoices that didn't fit earlier.
@@ -1090,8 +1091,23 @@
     if (userId() && Cloud.parkedCount()) Cloud.requeueParked();
   }
 
-  // Placeholder for analytics events (wired up in a later phase).
-  function track() {}
+  // Analytics events (js/analytics.js; does nothing unless analytics is configured).
+  function track(name, props) {
+    if (window.SPAnalytics) window.SPAnalytics.track(name, props);
+  }
+
+  // Count a sign-up once: the first time this browser sees an account created in the last hour.
+  function trackSignup(profile) {
+    if (!profile || !profile.created_at || Date.now() - Date.parse(profile.created_at) > 3600 * 1000) return;
+    const key = 'shutterpaid:signupTracked:' + profile.id;
+    try {
+      if (localStorage.getItem(key)) return;
+      localStorage.setItem(key, '1');
+    } catch (e) {
+      return;
+    }
+    track('Signup');
+  }
 
   function planSummary(p) {
     const date = (iso) => iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '';
@@ -1141,7 +1157,7 @@
     history.replaceState(null, '', location.pathname);
     if (result === 'cancel') return toast('Checkout canceled. You\'re still on the Free plan.');
     toast('Thanks! Setting up Pro…');
-    track('Upgraded');
+    track('Upgrade');
     let tries = 0;
     const timer = setInterval(() => {
       if (isPro() || ++tries > 10) {

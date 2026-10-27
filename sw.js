@@ -4,12 +4,14 @@
 // - A new version waits until the user taps "Refresh" (see js/pwa.js), then takes over.
 // CACHE must change on every release. Deploy builds stamp it with the commit (scripts/build.mjs);
 // if you deploy without the build step, bump the number by hand.
-const CACHE = 'shutterpaid-v4';
+const CACHE = 'shutterpaid-v5';
 const ASSETS = [
   './',
   'index.html',
   'app.html',
   'css/styles.css',
+  'js/analytics.js',
+  'js/beta.js',
   'js/core.js',
   'js/schedule.js',
   'js/cloud.js',

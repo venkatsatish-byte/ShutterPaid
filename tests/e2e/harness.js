@@ -32,10 +32,10 @@ const CONFIG = 'window.SP_CONFIG={supabaseUrl:"https://fake.supabase.co",supabas
 let failures = 0;
 const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) failures++; };
 
-async function ctx(browser, { cloud, mobile, scheme } = {}) {
+async function ctx(browser, { cloud, mobile, scheme, config } = {}) {
   const c = await browser.newContext(Object.assign({}, mobile ? devices['iPhone 13'] : {}, { colorScheme: scheme || 'dark', serviceWorkers: 'block' }));
   await c.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: BASE }).catch(() => {});
-  await c.route('**/js/config.js', (r) => r.fulfill({ contentType: 'text/javascript', body: cloud ? CONFIG : 'window.SP_CONFIG={};' }));
+  await c.route('**/js/config.js', (r) => r.fulfill({ contentType: 'text/javascript', body: config ? 'window.SP_CONFIG=' + JSON.stringify(config) + ';' : cloud ? CONFIG : 'window.SP_CONFIG={};' }));
   await c.route('https://cdn.jsdelivr.net/**', (r) => r.fulfill({ contentType: 'text/javascript', body: FAKE }));
   const page = await c.newPage();
   page.errors = [];

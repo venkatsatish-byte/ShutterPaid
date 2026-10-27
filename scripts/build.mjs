@@ -1,8 +1,9 @@
 // Deploy step for Vercel / Netlify (no bundling: the site is still plain files).
 // 1. Writes js/config.js from environment variables (or a local .env file).
 // 2. Stamps the service worker cache name with the commit, so every deploy reaches users.
+// 3. Fills in the public site URL and support email in the pages, sitemap and robots.txt.
 // Only public, browser-safe values belong here. Server secrets live in Supabase secrets.
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -19,7 +20,9 @@ if (existsSync(envFile)) {
 
 const config = {
   supabaseUrl: process.env.SUPABASE_URL || '',
-  supabaseAnonKey: process.env.SUPABASE_ANON_KEY || ''
+  supabaseAnonKey: process.env.SUPABASE_ANON_KEY || '',
+  plausibleDomain: process.env.PLAUSIBLE_DOMAIN || '',
+  plausibleSrc: process.env.PLAUSIBLE_SRC || ''
 };
 
 if (config.supabaseUrl && !/^https:\/\//.test(config.supabaseUrl)) {
@@ -39,4 +42,28 @@ if (sha) {
   const sw = readFileSync(swPath, 'utf8').replace(/const CACHE = 'shutterpaid-([^'-]+)[^']*';/, `const CACHE = 'shutterpaid-$1-${sha}';`);
   writeFileSync(swPath, sw);
   console.log('Stamped sw.js cache with ' + sha);
+}
+
+// Placeholders in the committed files, replaced at deploy. Left as-is when the variable isn't set.
+const SITE_PLACEHOLDER = 'https://your-domain.com';
+const EMAIL_PLACEHOLDER = 'support@your-domain.com';
+const siteUrl = (process.env.SITE_URL || process.env.APP_URL || '').replace(/\/$/, '');
+const supportEmail = process.env.SUPPORT_EMAIL || '';
+if (siteUrl && !/^https:\/\//.test(siteUrl)) {
+  console.error('SITE_URL must start with https://');
+  process.exit(1);
+}
+// Only on the deploy host (Vercel, Netlify or CI), so a local build never edits tracked files.
+const onDeployHost = !!(process.env.VERCEL || process.env.NETLIFY || process.env.CI);
+if ((siteUrl || supportEmail) && onDeployHost) {
+  const files = readdirSync(root).filter((f) => /\.(html|xml|txt)$/.test(f));
+  for (const f of files) {
+    const path = join(root, f);
+    const before = readFileSync(path, 'utf8');
+    let after = before;
+    if (siteUrl) after = after.split(SITE_PLACEHOLDER).join(siteUrl);
+    if (supportEmail) after = after.split(EMAIL_PLACEHOLDER).join(supportEmail);
+    if (after !== before) writeFileSync(path, after);
+  }
+  console.log('Filled in ' + [siteUrl && 'SITE_URL', supportEmail && 'SUPPORT_EMAIL'].filter(Boolean).join(' and '));
 }

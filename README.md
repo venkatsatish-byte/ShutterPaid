@@ -13,6 +13,7 @@ ShutterPaid is an invoice reminder app for photographers. It runs as a website a
 - **Local-only mode**: without signing in, everything stays in the browser's `localStorage`, exactly as before.
 - **Plans**: Free (up to 5 active invoices, manual reminders, sync) and Pro ($9/month or $90/year: unlimited invoices and automatic reminders) with a 14-day free trial that needs no card. Upgrade with Stripe Checkout; change plan, update the card or cancel in the Stripe Customer Portal ("Manage billing"). Limits are enforced in the database, not just the app. Local-only mode (no account) has no limits.
 - **Settings** for your name, business, currency, payment link and email signature
+- **Website basics**: pricing, a "Join the beta" email list, draft privacy policy and terms, cookie-free analytics (Plausible), Open Graph share image, `sitemap.xml` and `robots.txt`
 - **Backup**: export or import your data as JSON, or load sample data to try the app out
 
 ## Run locally
@@ -109,14 +110,22 @@ Do all of this in **test mode** first, then repeat it in live mode at launch.
 - The trial is offered once per account and needs no card; if no card is added by the end, Stripe cancels the subscription and the account returns to Free.
 - Display prices are in `index.html` and `js/app.js` (`PRICES`). If you change prices in Stripe, update them there too.
 
-### 5. Deploy (Vercel or Netlify)
+### 5. Launch basics: legal pages, analytics, beta list, SEO
+1. **Legal review.** `privacy.html` and `terms.html` are drafts with a banner saying so, and `noindex` so search engines skip them. Fill in every `[square bracket]` (company name, address, governing law, refund policy, retention periods) with your lawyer. When they're final, remove the `draft-banner` block and the `<meta name="robots" content="noindex">` line from both, and add both pages to `sitemap.xml`.
+2. **Site URL and support email.** Set `SITE_URL` (e.g. `https://shutterpaid.com`) and `SUPPORT_EMAIL` in Vercel/Netlify. The deploy build replaces the `https://your-domain.com` and `support@your-domain.com` placeholders in the pages, `sitemap.xml` and `robots.txt`. Make sure the support address actually receives mail.
+3. **Analytics (Plausible).** Create a site at [plausible.io](https://plausible.io) for your domain and set `PLAUSIBLE_DOMAIN` to it. Under *Site settings → Goals*, add custom-event goals named exactly `Signup`, `Upgrade started`, `Upgrade` and `Beta signup`. Plausible uses no cookies, so no cookie banner is needed for it. With `PLAUSIBLE_DOMAIN` empty, nothing loads.
+4. **Beta list.** The migration creates `beta_signups`. Visitors can add an email but nobody can read the list through the API: view or export it in Supabase → Table Editor → `beta_signups`. The form is hidden when Supabase isn't configured (e.g. on GitHub Pages).
+5. **Search and sharing.** After the first deploy, submit `https://<your-domain>/sitemap.xml` in Google Search Console, and check the share preview with a tool such as the Facebook Sharing Debugger or opengraph.xyz. The share image is `og-image.png` (1200×630).
+
+### 6. Deploy (Vercel or Netlify)
 Both configs are included (`vercel.json`, `netlify.toml`). They run `node scripts/build.mjs`, which:
-- writes `js/config.js` from the `SUPABASE_URL` and `SUPABASE_ANON_KEY` environment variables, and
-- stamps the service worker cache name with the commit, so every deploy reaches users.
+- writes `js/config.js` from the `SUPABASE_URL`, `SUPABASE_ANON_KEY` and `PLAUSIBLE_DOMAIN` environment variables,
+- stamps the service worker cache name with the commit, so every deploy reaches users, and
+- fills in `SITE_URL` and `SUPPORT_EMAIL` in the pages (only on the deploy host, so local builds don't edit tracked files).
 
 Steps:
 1. Import the repo into Vercel or Netlify. Leave the framework as "Other" or none.
-2. Add `SUPABASE_URL` and `SUPABASE_ANON_KEY` under the project's **Environment Variables**.
+2. Add `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SITE_URL`, `SUPPORT_EMAIL` and `PLAUSIBLE_DOMAIN` under the project's **Environment Variables**.
 3. Add your custom domain and follow the host's DNS instructions (usually an `A`/`ALIAS` record for the apex and a `CNAME` for `www`).
 4. Update the Supabase Site URL and redirect URLs to the final domain.
 
@@ -140,7 +149,7 @@ The service worker pre-caches the app for offline use. When a new version is dep
 ```bash
 npm test             # unit tests: dates, due status, sync merging, the reminder scheduler and the send run (no install needed)
 npm i -D playwright && npx playwright install chromium
-npm run test:e2e     # browser tests: local-only mode, sign-in, upload, offline queue, update prompt, reminders, stop page, plans and upgrade
+npm run test:e2e     # browser tests: local-only mode, sign-in, upload, offline queue, update prompt, reminders, stop page, plans and upgrade, legal pages, beta list, analytics events, SEO tags
 ```
 The browser tests use an in-page fake of Supabase (`tests/e2e/fake-supabase.js`), so they need no real project.
 
@@ -160,8 +169,13 @@ js/schedule.js         Reminder schedule rules and email copy (shared with the E
 js/cloud.js            Supabase auth and the offline sync queue
 js/app.js              App UI and local cache
 js/pwa.js              Service worker registration, update prompt, install button
+js/analytics.js        Plausible loader and event helper (off unless configured)
+js/beta.js             "Join the beta" form on the landing page
 js/config.js           Generated at deploy from env vars (not committed)
 stop.html              Page where clients stop reminders for an invoice
+privacy.html, terms.html  Draft legal pages (for review before launch)
+og-image.png           Share image for links (1200×630)
+sitemap.xml, robots.txt  Search engine files
 sw.js                  Offline cache
 supabase/migrations/   Database schema, Row Level Security, reminder claiming, hourly cron
 supabase/functions/    Edge Functions: send-reminders, stop-reminders, create-checkout, billing-portal, stripe-webhook

@@ -24,6 +24,10 @@
     --border: #e4e2ef;
     --text: #1a1a2e;
     --muted: #64657d;
+    /* Darker status colours so text stays readable on light backgrounds. */
+    --ok: #0f8a5f;
+    --warn: #b45309;
+    --danger: #dc2626;
     --shadow: 0 10px 30px rgba(30, 30, 80, 0.08);
     color-scheme: light;
   }
@@ -108,6 +112,7 @@ img, svg { max-width: 100%; }
 .nav-links { display: flex; gap: 20px; align-items: center; }
 .nav-links a { text-decoration: none; color: var(--muted); font-weight: 500; }
 .nav-links a:hover { color: var(--text); }
+.nav-links a.btn-primary, .nav-links a.btn-primary:hover { color: #fff; }
 .site-header .btn { white-space: nowrap; }
 
 /* Landing */
@@ -228,6 +233,37 @@ section { padding: 72px 0; }
 .cta-band .btn { background: #fff; color: #1a1a2e; border-color: transparent; }
 
 .site-footer { padding: 40px 0; color: var(--muted); text-align: center; font-size: 0.9rem; }
+
+/* Footer links and legal pages */
+.footer-links { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 20px; }
+.footer-links a { color: var(--muted); }
+.footer-links a:hover { color: var(--text); }
+.legal { max-width: 760px; padding: 40px 0 24px; }
+.legal h1 { font-size: clamp(1.8rem, 5vw, 2.4rem); letter-spacing: -0.02em; margin: 24px 0 4px; }
+.legal h2 { font-size: 1.25rem; margin: 36px 0 10px; }
+.legal h3 { font-size: 1rem; margin: 20px 0 6px; }
+.legal p, .legal li { color: var(--text); line-height: 1.7; }
+.legal p { margin: 0 0 12px; }
+.legal ul { padding-left: 22px; margin: 0 0 12px; display: grid; gap: 6px; }
+.legal a { color: var(--accent); overflow-wrap: anywhere; }
+.draft-banner {
+  border: 1px dashed var(--warn);
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  border-radius: 12px;
+  padding: 12px 16px;
+  font-size: 0.9rem;
+}
+
+/* Beta sign-up */
+.beta { max-width: 560px; margin: 0 auto; text-align: center; display: grid; gap: 14px; }
+.beta-form { display: flex; gap: 10px; flex-wrap: wrap; }
+.beta-form input[type=email] { flex: 1 1 220px; }
+.beta-form .btn { flex: 0 0 auto; }
+.beta .hint { margin: 0; }
+.beta-status { margin: 0; font-weight: 600; min-height: 1.5em; }
+.beta-status.ok { color: var(--ok); }
+.beta-status.err { color: var(--danger); }
+.hp { position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden; }
 
 /* Badges */
 .badge {

@@ -194,6 +194,8 @@
       autoRemind: !!row.auto_remind,
       reminderSchedule: row.reminder_schedule || null,
       remindersStoppedAt: row.reminders_stopped_at || '',
+      paymentUrl: row.payment_url || '',
+      paidVia: row.paid_via || '',
       reminders: reminders || []
     };
   }
@@ -223,7 +225,7 @@
 
   // Explicit column lists: the browser isn't allowed to read server-only columns.
   const INVOICE_COLUMNS = 'id,user_id,client_name,client_email,shoot_type,number,amount,currency,shoot_date,due_date,' +
-    'notes,paid,paid_date,created_at,updated_at,auto_remind,reminder_schedule,reminders_stopped_at';
+    'notes,paid,paid_date,created_at,updated_at,auto_remind,reminder_schedule,reminders_stopped_at,payment_url,paid_via';
   const REMINDER_COLUMNS = 'id,invoice_id,sent_on,sent_at,tone,channel,status,scheduled_for,step_offset,error';
 
   const SETTINGS_COLUMNS = {
@@ -236,7 +238,8 @@
     timeZone: 'time_zone',
     reminderSchedule: 'reminder_schedule',
     sendHour: 'send_hour',
-    replyTo: 'reply_to'
+    replyTo: 'reply_to',
+    businessAddress: 'business_address'
   };
 
   function settingsToRow(settings, userId) {
@@ -345,7 +348,10 @@
       trialEndsAt: p.trial_ends_at || '',
       cancelAtPeriodEnd: !!p.cancel_at_period_end,
       trialUsed: !!p.trial_used,
-      hasBilling: !!p.stripe_customer_id
+      hasBilling: !!p.stripe_customer_id,
+      // The photographer's own Stripe account for per-invoice payment links.
+      stripeConnected: !!p.stripe_connect_account_id,
+      acceptsPayments: !!(p.stripe_connect_account_id && p.connect_charges_enabled)
     };
   }
 
@@ -373,6 +379,32 @@
     return { fits, left };
   }
 
+  // ---------- CSV export ----------
+  // Spreadsheet apps run cells starting with = + - @ as formulas; prefix those with ' so a client
+  // name can't become a formula when the file is opened.
+  function csvCell(value) {
+    let v = value == null ? '' : String(value);
+    if (/^[=+\-@\t\r]/.test(v)) v = "'" + v;
+    return /[",\r\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+  }
+
+  const CSV_STATUS = { paid: 'Paid', overdue: 'Overdue', soon: 'Due soon', open: 'Open' };
+
+  function toCSV(invoices, soonDays, today) {
+    const header = ['Invoice #', 'Client', 'Client email', 'Shoot type', 'Shoot date', 'Due date', 'Amount', 'Currency',
+      'Status', 'Paid date', 'Paid via', 'Reminders sent', 'Last reminder', 'Auto reminders', 'Payment link', 'Notes'];
+    const rows = invoices.slice().sort((a, b) => String(a.dueDate).localeCompare(String(b.dueDate))).map((inv) => {
+      const sent = (inv.reminders || []).filter(isDelivered);
+      return [
+        inv.number, inv.clientName, inv.clientEmail, inv.shootType, inv.shootDate, inv.dueDate,
+        Number(inv.amount || 0).toFixed(2), inv.currency,
+        CSV_STATUS[statusOf(inv, soonDays, today)], inv.paid ? inv.paidDate : '', inv.paid ? (inv.paidVia === 'stripe' ? 'Stripe' : 'Manual') : '',
+        sent.length, sent.length ? sent[sent.length - 1].date : '', inv.autoRemind ? 'On' : 'Off', inv.paymentUrl || '', inv.notes
+      ];
+    });
+    return [header].concat(rows).map((r) => r.map(csvCell).join(',')).join('\r\n') + '\r\n';
+  }
+
   return {
     DAY,
     toISO, todayISO, parseISO, addDays, daysBetween, daysUntil,
@@ -381,6 +413,6 @@
     invoiceToRow, rowToInvoice, reminderToRow, rowToReminder, settingsToRow, rowToSettings, assemble,
     INVOICE_COLUMNS, REMINDER_COLUMNS,
     coalesceOps, pendingKeys, mergeRemote, isTransientError, planLimitError,
-    FREE_ACTIVE_LIMIT, planFromProfile, isPro, activeCount, fitToPlan
+    FREE_ACTIVE_LIMIT, planFromProfile, isPro, activeCount, fitToPlan, csvCell, toCSV
   };
 });

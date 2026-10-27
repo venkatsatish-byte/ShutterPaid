@@ -8,6 +8,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2.45.4';
 import '../_shared/schedule.js';
 import '../_shared/reminders.js';
 import { json, requireEnv, safeEqual } from '../_shared/http.ts';
+import { ensurePaymentLink, stripeClient } from '../_shared/stripe.ts';
 
 // deno-lint-ignore no-explicit-any
 const { runReminders } = (globalThis as any).SPReminders;
@@ -28,6 +29,8 @@ Deno.serve(async (req) => {
     });
     const resendKey = requireEnv('RESEND_API_KEY');
     const dryRun = new URL(req.url).searchParams.get('dry') === '1';
+    // Payment links need Stripe; without the secret, reminders use the general payment link.
+    const stripe = Deno.env.get('STRIPE_SECRET_KEY') ? stripeClient() : null;
 
     const report = await runReminders(
       {
@@ -40,7 +43,7 @@ Deno.serve(async (req) => {
           for (let from = 0; ; from += PAGE) {
             const { data, error } = await db
               .from('invoices')
-              .select('id,user_id,client_name,client_email,shoot_type,number,amount,currency,due_date,paid,auto_remind,reminder_schedule,reminders_stopped_at,unsubscribe_token')
+              .select('id,user_id,client_name,client_email,shoot_type,number,amount,currency,due_date,paid,auto_remind,reminder_schedule,reminders_stopped_at,unsubscribe_token,payment_url')
               .eq('auto_remind', true).eq('paid', false).is('reminders_stopped_at', null).neq('client_email', '')
               .order('id').range(from, from + PAGE - 1);
             if (error) throw error;
@@ -63,6 +66,8 @@ Deno.serve(async (req) => {
                 number: i.number, amount: Number(i.amount), currency: i.currency, dueDate: i.due_date,
                 paid: i.paid, autoRemind: i.auto_remind, reminderSchedule: i.reminder_schedule,
                 remindersStoppedAt: i.reminders_stopped_at,
+                paymentUrl: i.payment_url,
+                connected: !!(p.stripe_connect_account_id && p.connect_charges_enabled),
               },
               profile: {
                 email: p.email, ownerName: p.owner_name, businessName: p.business_name, currency: p.currency,
@@ -90,6 +95,11 @@ Deno.serve(async (req) => {
             }
           }
           return map;
+        },
+
+        async paymentLink(invoice: { id: string; connected: boolean }) {
+          if (!stripe || !invoice.connected) return null;
+          return (await ensurePaymentLink(stripe, db, invoice.id)).url;
         },
 
         async claim(a: { invoiceId: string; scheduledFor: string; stepOffset: number; tone: string; localDate: string; toEmail: string }) {

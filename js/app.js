@@ -19,7 +19,8 @@
     timeZone: deviceTimeZone(),
     reminderSchedule: Sched.DEFAULT_SCHEDULE.map((x) => Object.assign({}, x)),
     sendHour: Sched.DEFAULT_SEND_HOUR,
-    replyTo: ''
+    replyTo: '',
+    businessAddress: ''
   };
 
   function deviceTimeZone() {
@@ -214,7 +215,7 @@
     const meta = [
       esc(inv.shootType),
       inv.number ? esc(inv.number) : '',
-      relativeDue(inv),
+      relativeDue(inv) + (inv.paid && inv.paidVia === 'stripe' ? ' online 💳' : ''),
       last ? 'Last reminded ' + prettyDate(last.date) : ''
     ].filter(Boolean).join(' · ');
 
@@ -226,6 +227,7 @@
       actions.push('<button class="btn btn-sm" data-act="unpaid" data-id="' + esc(inv.id) + '">↩️ Mark unpaid</button>');
     }
     if (!opts || !opts.compact) {
+      actions.push('<button class="btn btn-sm btn-ghost" data-act="pdf" data-id="' + esc(inv.id) + '">📄 PDF</button>');
       actions.push('<button class="btn btn-sm btn-ghost" data-act="edit" data-id="' + esc(inv.id) + '">Edit</button>');
       actions.push('<button class="btn btn-sm btn-ghost btn-danger" data-act="delete" data-id="' + esc(inv.id) + '">Delete</button>');
     }
@@ -447,6 +449,7 @@
     renderInvoices();
     renderAccount();
     renderPlan();
+    renderPayments();
   }
 
   // ---------- Account & sync status ----------
@@ -628,6 +631,7 @@
         inv.paidDate = todayISO();
         putInvoice(inv); renderAll();
         freedSlot();
+        retirePayLink(inv);
         toast('Marked paid — nice work! 💸');
         break;
       case 'unpaid':
@@ -638,6 +642,9 @@
         break;
       case 'edit':
         openInvoiceDialog(inv);
+        break;
+      case 'pdf':
+        openInvoiceDoc(inv);
         break;
       case 'delete':
         if (confirm('Delete the invoice for ' + inv.clientName + '?')) {
@@ -662,10 +669,12 @@
     return Sched.buildReminder(inv, state.settings, tone, todayISO());
   }
 
+  let generatedBody = '';
   function fillReminder() {
     const r = buildReminder(reminderInvoice, reminderTone);
     $('#reminderSubject').value = r.subject;
     $('#reminderBody').value = r.body;
+    generatedBody = r.body;
     $$('#tonePicker .chip').forEach((c) => c.classList.toggle('active', c.dataset.tone === reminderTone));
   }
 
@@ -674,6 +683,12 @@
     reminderTone = suggestedTone(inv);
     fillReminder();
     reminderDialog.showModal();
+    // Add (or refresh) the invoice's Stripe payment link, then update the text if it wasn't edited.
+    if (acceptsPayments() && !inv.paid) {
+      ensurePayLink(inv).then(() => {
+        if (reminderInvoice === inv && reminderDialog.open && $('#reminderBody').value === generatedBody) fillReminder();
+      });
+    }
   }
 
   function logReminder(channel) {
@@ -732,14 +747,194 @@
     toast('Settings saved');
   });
 
-  $('#exportBtn').addEventListener('click', () => {
-    const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+  function download(blob, name) {
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = 'shutterpaid-backup-' + todayISO() + '.json';
+    a.download = name;
+    document.body.appendChild(a);
     a.click();
+    a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+
+  $('#exportBtn').addEventListener('click', () => {
+    download(new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' }), 'shutterpaid-backup-' + todayISO() + '.json');
   });
+
+  // CSV for spreadsheets and accountants. The BOM makes Excel read accents and currency symbols.
+  function exportCSV() {
+    if (!state.invoices.length) return toast('No invoices to export yet');
+    const csv = Core.toCSV(state.invoices, state.settings.soonDays, todayISO());
+    download(new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' }), 'shutterpaid-invoices-' + todayISO() + '.csv');
+    toast('Exported ' + state.invoices.length + ' invoice' + (state.invoices.length === 1 ? '' : 's') + ' to CSV');
+  }
+  $('#csvBtn').addEventListener('click', exportCSV);
+  $('#csvBtn2').addEventListener('click', exportCSV);
+
+  // ---------- Invoice document (PDF via the browser's "Save as PDF") ----------
+  // Printing an HTML invoice keeps every client name, accent and currency symbol intact and needs
+  // no PDF library, so it also works offline.
+  const docDialog = $('#docDialog');
+  let docInvoice = null;
+
+  function invoiceDocHTML(inv) {
+    const s = state.settings;
+    const business = s.businessName || s.ownerName || 'Your business';
+    const contact = [
+      s.businessName && s.ownerName ? s.ownerName : '',
+      s.businessAddress,
+      s.replyTo || (Cloud.user() && Cloud.user().email) || ''
+    ].filter(Boolean).join('\n');
+    const issued = String(inv.createdAt || '').slice(0, 10) || todayISO();
+    const kind = inv.shootType && inv.shootType !== 'Other' ? inv.shootType + ' photography' : 'Photography';
+    const link = inv.paymentUrl || s.paymentLink;
+    const row = (label, value) => value ? '<dt>' + esc(label) + '</dt><dd>' + esc(value) + '</dd>' : '';
+    return '<article class="invoice-sheet">' +
+      (inv.paid ? '<div class="stamp">PAID</div>' : '') +
+      '<div class="inv-top">' +
+        '<div class="inv-from"><strong>' + esc(business) + '</strong>' + esc(contact) + '</div>' +
+        '<div class="inv-meta"><h1>Invoice</h1><dl>' +
+          row('Invoice #', inv.number) + row('Issued', prettyDate(issued)) + row('Due', prettyDate(inv.dueDate)) +
+          (inv.paid ? row('Paid', prettyDate(inv.paidDate)) : '') +
+        '</dl></div>' +
+      '</div>' +
+      '<div class="inv-bill"><div class="inv-label">Bill to</div><div><strong>' + esc(inv.clientName) + '</strong></div>' +
+        (inv.clientEmail ? '<div>' + esc(inv.clientEmail) + '</div>' : '') + '</div>' +
+      '<table><thead><tr><th>Description</th><th class="num">Amount</th></tr></thead><tbody>' +
+        '<tr><td>' + esc(kind) + (inv.shootDate ? '<br><span style="color:#6b6c84">Session on ' + esc(prettyDate(inv.shootDate)) + '</span>' : '') + '</td>' +
+        '<td class="num">' + esc(money(inv.amount, inv.currency)) + '</td></tr>' +
+        '<tr class="inv-total"><td>' + (inv.paid ? 'Total paid' : 'Total due') + '</td><td class="num">' + esc(money(inv.amount, inv.currency)) + '</td></tr>' +
+      '</tbody></table>' +
+      (!inv.paid && link ? '<div class="inv-pay"><div class="inv-label">Pay online</div><a href="' + esc(link) + '">' + esc(link) + '</a></div>' : '') +
+      (inv.notes ? '<div class="inv-notes"><div class="inv-label">Notes</div>' + esc(inv.notes) + '</div>' : '') +
+      '<div class="inv-foot">Thank you for your business.</div>' +
+    '</article>';
+  }
+
+  function openInvoiceDoc(inv) {
+    docInvoice = inv;
+    $('#docPreview').innerHTML = invoiceDocHTML(inv);
+    docDialog.showModal();
+    if (acceptsPayments() && !inv.paid) {
+      ensurePayLink(inv).then(() => {
+        if (docInvoice === inv && docDialog.open) $('#docPreview').innerHTML = invoiceDocHTML(inv);
+      });
+    }
+  }
+
+  $('#docClose').addEventListener('click', () => docDialog.close());
+
+  $('#docPrint').addEventListener('click', () => {
+    const inv = docInvoice;
+    if (!inv) return;
+    const title = document.title;
+    $('#printRoot').innerHTML = invoiceDocHTML(inv);
+    // Browsers use the page title as the suggested PDF file name.
+    document.title = ['Invoice', inv.number, inv.clientName].filter(Boolean).join(' - ');
+    document.body.classList.add('printing');
+    docDialog.close();
+    const done = () => {
+      window.removeEventListener('afterprint', done);
+      document.body.classList.remove('printing');
+      document.title = title;
+      $('#printRoot').innerHTML = '';
+    };
+    window.addEventListener('afterprint', done);
+    try {
+      window.print();
+    } catch (e) {
+      done();
+      toast('Printing isn\'t available here. Try opening ShutterPaid in your browser.');
+    }
+  });
+
+  // ---------- Stripe payment links (photographer's own Stripe account) ----------
+  function acceptsPayments() {
+    return !!userId() && !!(state.plan && state.plan.acceptsPayments);
+  }
+
+  // Wait until queued changes (e.g. a new amount) have reached the server.
+  async function flushed() {
+    Cloud.sync();
+    for (let i = 0; i < 50; i++) {
+      const s = Cloud.info();
+      if (s.status === 'synced' && !s.pending) return true;
+      if (s.status === 'offline' || s.status === 'error') return false;
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    return false;
+  }
+
+  async function ensurePayLink(inv) {
+    if (!acceptsPayments() || inv.paid || navigator.onLine === false) return inv.paymentUrl || '';
+    try {
+      if (!(await flushed())) return inv.paymentUrl || '';
+      const r = await Cloud.invoke('payment-link', { invoiceId: inv.id, action: 'ensure' });
+      // A sync may have replaced the invoice object meanwhile: update the current one too.
+      const current = state.invoices.find((i) => i.id === inv.id);
+      if (r && r.url && (r.url !== inv.paymentUrl || (current && current.paymentUrl !== r.url))) {
+        inv.paymentUrl = r.url;
+        if (current) current.paymentUrl = r.url;
+        save();
+        renderAll();
+      }
+    } catch (err) {
+      console.warn('Payment link unavailable', err);
+    }
+    return inv.paymentUrl || '';
+  }
+
+  // The server knows whether a link exists, so ask it whenever Stripe is connected.
+  function retirePayLink(inv) {
+    if (!userId() || !(inv.paymentUrl || acceptsPayments())) return;
+    inv.paymentUrl = '';
+    save();
+    Cloud.invoke('payment-link', { invoiceId: inv.id, action: 'retire' }).catch((err) => console.warn('Could not turn off payment link', err));
+  }
+
+  function renderPayments() {
+    const panel = $('#payPanel');
+    panel.hidden = !Cloud.enabled || !userId();
+    if (panel.hidden) return;
+    const p = state.plan || {};
+    const btn = $('#connectBtn');
+    btn.hidden = !!p.acceptsPayments;
+    btn.textContent = p.stripeConnected ? 'Finish Stripe setup' : 'Connect Stripe';
+    $('#stripeDashBtn').hidden = !p.stripeConnected;
+    $('#payDetail').textContent = p.acceptsPayments
+      ? '✅ Stripe is connected. Each unpaid invoice gets its own payment link in reminders and PDF invoices. When a client pays, the invoice is marked paid and reminders stop.'
+      : p.stripeConnected
+        ? 'Almost there: finish setting up your Stripe account so clients can pay you online.'
+        : 'Connect your Stripe account and every invoice gets its own payment link, added to your reminders and PDF invoices. When a client pays, the invoice is marked paid and reminders stop. Money goes straight to your Stripe account.';
+  }
+
+  $('#connectBtn').addEventListener('click', async () => {
+    const btn = $('#connectBtn');
+    btn.disabled = true;
+    try {
+      const r = await Cloud.invoke('stripe-connect', { action: 'start' });
+      window.location.href = r.url;
+    } catch (err) {
+      toast(err.message);
+      btn.disabled = false;
+    }
+  });
+
+  // Back from Stripe's onboarding.
+  async function handleConnectReturn() {
+    const result = new URLSearchParams(location.search).get('connect');
+    if (!result) return;
+    history.replaceState(null, '', location.pathname);
+    showView('settings');
+    if (result === 'refresh') return toast('That Stripe link expired. Press Connect Stripe to continue.');
+    try {
+      const r = await Cloud.invoke('stripe-connect', { action: 'status' });
+      Cloud.sync();
+      toast(r.chargesEnabled ? 'Stripe connected. Your invoices now include payment links 💳' : 'Stripe still needs a few details. Press Finish Stripe setup.');
+    } catch (err) {
+      toast(err.message);
+    }
+  }
 
   $('#importInput').addEventListener('change', async (e) => {
     const file = e.target.files[0];
@@ -1173,6 +1368,8 @@
   renderAll();
   Cloud.init({ onUser, onRemote, onStatus });
   handleCheckoutReturn();
+  // Wait for the session before asking Stripe about the connected account.
+  if (/[?&]connect=/.test(location.search)) setTimeout(handleConnectReturn, 800);
   if (location.hash === '#upgrade') {
     history.replaceState(null, '', location.pathname + location.search);
     openUpgrade('plan');

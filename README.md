@@ -14,6 +14,9 @@ ShutterPaid is an invoice reminder app for photographers. It runs as a website a
 - **Plans**: Free (up to 5 active invoices, manual reminders, sync) and Pro ($9/month or $90/year: unlimited invoices and automatic reminders) with a 14-day free trial that needs no card. Upgrade with Stripe Checkout; change plan, update the card or cancel in the Stripe Customer Portal ("Manage billing"). Limits are enforced in the database, not just the app. Local-only mode (no account) has no limits.
 - **Settings** for your name, business, currency, payment link and email signature
 - **Website basics**: pricing, a "Join the beta" email list, draft privacy policy and terms, cookie-free analytics (Plausible), Open Graph share image, `sitemap.xml` and `robots.txt`
+- **PDF invoices**: a clean invoice per shoot with your business details, saved with the browser's "Save as PDF" (works offline, any language or currency symbol)
+- **Online payments** (signed in): connect your own Stripe account and each invoice gets a one-time payment link, added to reminders and PDFs. When the client pays, the invoice is marked paid and reminders stop.
+- **CSV export** of all invoices for spreadsheets and accountants
 - **Backup**: export or import your data as JSON, or load sample data to try the app out
 
 ## Run locally
@@ -117,7 +120,29 @@ Do all of this in **test mode** first, then repeat it in live mode at launch.
 4. **Beta list.** The migration creates `beta_signups`. Visitors can add an email but nobody can read the list through the API: view or export it in Supabase → Table Editor → `beta_signups`. The form is hidden when Supabase isn't configured (e.g. on GitHub Pages).
 5. **Search and sharing.** After the first deploy, submit `https://<your-domain>/sitemap.xml` in Google Search Console, and check the share preview with a tool such as the Facebook Sharing Debugger or opengraph.xyz. The share image is `og-image.png` (1200×630).
 
-### 6. Deploy (Vercel or Netlify)
+### 6. Online payments for photographers (Stripe Connect)
+Photographers connect **their own** Stripe account; clients pay them directly, and ShutterPaid never holds the money.
+1. **Turn on Connect.** In your Stripe dashboard, open Connect and complete the platform setup (choose *Standard* accounts). Fill in your platform's name, icon and branding, which photographers see during onboarding.
+2. **Connect webhook.** In Developers → Webhooks, add a *second* endpoint that listens to **events on Connected accounts**: URL `https://<project-ref>.supabase.co/functions/v1/stripe-connect-webhook`, events `checkout.session.completed`, `checkout.session.async_payment_succeeded` and `account.updated`. Save its signing secret as `STRIPE_CONNECT_WEBHOOK_SECRET`.
+3. **Deploy:**
+   ```bash
+   npx supabase secrets set --env-file supabase/.env.functions
+   npx supabase db push
+   npx supabase functions deploy stripe-connect
+   npx supabase functions deploy payment-link
+   npx supabase functions deploy stripe-connect-webhook
+   npx supabase functions deploy send-reminders   # now adds payment links to automatic reminders
+   ```
+4. **Try it in test mode.** Settings → *Get paid online* → *Connect Stripe*, finish the test onboarding, then open *Remind* or *PDF* on an invoice: it gets a `buy.stripe.com` link. Pay it with `4242 4242 4242 4242` and the invoice turns paid on the next sync.
+
+**How it works**
+- Links are created on demand (when you open *Remind* or *PDF*, and before each automatic reminder) on the photographer's account, one per invoice, limited to **one successful payment**. If the amount or currency changes, a new link is made and the old one is switched off. Marking an invoice paid by hand switches its link off too.
+- When the client pays, Stripe sends `checkout.session.completed` to `stripe-connect-webhook`, which checks the event came from the account that owns the invoice and marks it paid ("paid online"). Reminders stop because the invoice is paid.
+- Link details live in server-only columns; the browser can read the link but can't change it.
+- If Stripe isn't connected (or link creation fails), reminders and PDFs fall back to the general payment link in Settings.
+- ShutterPaid takes no platform fee. To add one later, set `application_fee_amount` on the payment link (see `supabase/functions/_shared/paylinks.js`) and update the terms.
+
+### 7. Deploy (Vercel or Netlify)
 Both configs are included (`vercel.json`, `netlify.toml`). They run `node scripts/build.mjs`, which:
 - writes `js/config.js` from the `SUPABASE_URL`, `SUPABASE_ANON_KEY` and `PLAUSIBLE_DOMAIN` environment variables,
 - stamps the service worker cache name with the commit, so every deploy reaches users, and
@@ -149,7 +174,7 @@ The service worker pre-caches the app for offline use. When a new version is dep
 ```bash
 npm test             # unit tests: dates, due status, sync merging, the reminder scheduler and the send run (no install needed)
 npm i -D playwright && npx playwright install chromium
-npm run test:e2e     # browser tests: local-only mode, sign-in, upload, offline queue, update prompt, reminders, stop page, plans and upgrade, legal pages, beta list, analytics events, SEO tags
+npm run test:e2e     # browser tests: local-only mode, sign-in, upload, offline queue, update prompt, reminders, stop page, plans and upgrade, legal pages, beta list, analytics, SEO, CSV, PDF, Stripe Connect and payment links
 ```
 The browser tests use an in-page fake of Supabase (`tests/e2e/fake-supabase.js`), so they need no real project.
 
@@ -178,7 +203,8 @@ og-image.png           Share image for links (1200×630)
 sitemap.xml, robots.txt  Search engine files
 sw.js                  Offline cache
 supabase/migrations/   Database schema, Row Level Security, reminder claiming, hourly cron
-supabase/functions/    Edge Functions: send-reminders, stop-reminders, create-checkout, billing-portal, stripe-webhook
+supabase/functions/    Edge Functions: send-reminders, stop-reminders, create-checkout, billing-portal, stripe-webhook,
+                       stripe-connect, payment-link, stripe-connect-webhook
 scripts/build.mjs      Deploy step: writes js/config.js, versions the service worker
 tests/                 Unit tests (node:test) and browser tests (Playwright)
 manifest.webmanifest   PWA manifest
@@ -186,5 +212,5 @@ icons/                 App icons (SVG + PNG + maskable)
 ```
 
 ## Roadmap
-- PDF invoice generation
-- Stripe payment links created per invoice
+- Account deletion from Settings (today: erase data in Settings, or email support to delete the account)
+- Multiple line items per invoice

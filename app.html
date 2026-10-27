@@ -62,7 +62,10 @@
         <button class="chip" data-filter="overdue">Overdue</button>
         <button class="chip" data-filter="paid">Paid</button>
       </div>
-      <input type="search" id="searchInput" placeholder="Search by client, shoot or invoice #" style="margin-bottom:16px">
+      <div class="search-row">
+        <input type="search" id="searchInput" placeholder="Search by client, shoot or invoice #" aria-label="Search invoices">
+        <button class="btn btn-sm" id="csvBtn" type="button">Export CSV</button>
+      </div>
       <div class="panel">
         <ul class="list" id="invoiceList"></ul>
       </div>
@@ -112,6 +115,9 @@
             <input name="paymentLink" type="url" placeholder="https://paypal.me/yourname">
           </label>
           <label>Email signature<textarea name="signature" placeholder="Alex Rivera&#10;Rivera Photography · riveraphoto.com"></textarea></label>
+          <label>Business details for invoices <span class="hint">Address, phone, tax or VAT number. Shown on PDF invoices.</span>
+            <textarea name="businessAddress" placeholder="Rivera Photography LLC&#10;12 Main Street, Austin, TX 78701&#10;EIN 12-3456789"></textarea>
+          </label>
           <div class="dialog-actions" style="justify-content:flex-start">
             <button class="btn btn-primary" type="submit">Save settings</button>
           </div>
@@ -125,6 +131,15 @@
         <div class="toolbar">
           <button class="btn btn-sm btn-primary" id="planUpgradeBtn" type="button">Upgrade to Pro</button>
           <button class="btn btn-sm" id="planManageBtn" type="button" hidden>Manage billing</button>
+        </div>
+      </div>
+
+      <div class="panel" style="padding:20px" id="payPanel" hidden>
+        <h2 style="margin:0 0 6px;font-size:1.05rem">💳 Get paid online</h2>
+        <p class="sub" style="margin-bottom:16px" id="payDetail">Connect your Stripe account and every invoice gets its own payment link, added to your reminders and PDF invoices. When a client pays, the invoice is marked paid and reminders stop. Money goes straight to your Stripe account.</p>
+        <div class="toolbar">
+          <button class="btn btn-sm btn-primary" id="connectBtn" type="button">Connect Stripe</button>
+          <a class="btn btn-sm" id="stripeDashBtn" href="https://dashboard.stripe.com/" target="_blank" rel="noopener" hidden>Open Stripe dashboard</a>
         </div>
       </div>
 
@@ -160,6 +175,7 @@
         <p class="sub" style="margin-bottom:16px" id="backupNote">Your data is stored only on this device. Export a backup to keep it safe or move it to another device.</p>
         <div class="toolbar">
           <button class="btn btn-sm" id="exportBtn">Export backup</button>
+          <button class="btn btn-sm" id="csvBtn2" type="button">Export CSV</button>
           <label class="btn btn-sm" style="display:inline-flex">Import backup<input type="file" id="importInput" accept="application/json" hidden></label>
           <button class="btn btn-sm" id="demoBtn">Load sample data</button>
           <button class="btn btn-sm btn-danger" id="resetBtn">Erase all data</button>
@@ -273,6 +289,20 @@
       </div>
     </div>
   </dialog>
+
+  <!-- Invoice document (PDF) -->
+  <dialog id="docDialog" class="doc-dialog" aria-labelledby="docTitle">
+    <div class="dialog-inner">
+      <h2 id="docTitle" class="visually-hidden">Invoice preview</h2>
+      <div id="docPreview"></div>
+      <p class="hint" id="docHint" style="margin:12px 0 0">Choose "Save as PDF" in the print window to download it, or print it on paper.</p>
+      <div class="dialog-actions">
+        <button class="btn btn-ghost" id="docClose" type="button">Close</button>
+        <button class="btn btn-primary" id="docPrint" type="button">Save as PDF</button>
+      </div>
+    </div>
+  </dialog>
+  <div id="printRoot" aria-hidden="true"></div>
 
   <!-- Upgrade dialog -->
   <dialog id="upgradeDialog" aria-labelledby="upgradeTitle">

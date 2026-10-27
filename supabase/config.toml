@@ -13,3 +13,7 @@ verify_jwt = false
 # Called by Stripe; authenticity is checked with the webhook signing secret instead.
 [functions.stripe-webhook]
 verify_jwt = false
+
+# Called by Stripe for events on photographers' connected accounts; checked with its own secret.
+[functions.stripe-connect-webhook]
+verify_jwt = false

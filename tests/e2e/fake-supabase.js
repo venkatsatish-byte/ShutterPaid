@@ -86,6 +86,8 @@
       async invoke(name, opts) {
         window.__invoked = (window.__invoked || []).concat([{ name, body: opts && opts.body }]);
         if (offline()) return { data: null, error: { message: 'Failed to send a request to the Edge Function', context: {} } };
+        const custom = (window.__functionResults || {})[name];
+        if (custom) return { data: typeof custom === 'function' ? custom((opts && opts.body) || {}) : custom, error: null };
         const url = (window.__functionUrls || {})[name];
         if (!url) return { data: null, error: { message: 'Edge Function returned a non-2xx status code', context: { json: async () => ({ error: 'No billing account yet. Upgrade to Pro first.' }) } } };
         return { data: { url }, error: null };

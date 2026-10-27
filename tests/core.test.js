@@ -179,3 +179,28 @@ test('fitToPlan keeps paid invoices and the soonest-due unpaid ones', () => {
   assert.equal(C.fitToPlan(list, 9, 5).fits.length, 1);
   assert.equal(C.fitToPlan(list, 0, Infinity).left.length, 0);
 });
+
+test('CSV export escapes values and blocks spreadsheet formulas', () => {
+  assert.equal(C.csvCell('plain'), 'plain');
+  assert.equal(C.csvCell('Priya, Sam'), '"Priya, Sam"');
+  assert.equal(C.csvCell('He said "hi"'), '"He said ""hi"""');
+  assert.equal(C.csvCell('line1\nline2'), '"line1\nline2"');
+  assert.equal(C.csvCell('=HYPERLINK("http://evil")'), '"\'=HYPERLINK(""http://evil"")"');
+  assert.equal(C.csvCell('+1 555'), "'+1 555");
+  assert.equal(C.csvCell('@sum'), "'@sum");
+  assert.equal(C.csvCell(null), '');
+  assert.equal(C.csvCell(0), '0');
+});
+
+test('toCSV lists invoices by due date with status and reminder counts', () => {
+  const csv = C.toCSV([
+    inv({ number: 'INV-2', clientName: 'Late, Client', dueDate: '2026-03-20', amount: 99.5, currency: 'EUR' }),
+    inv({ number: 'INV-1', currency: 'USD', dueDate: '2026-03-01', paid: true, paidDate: '2026-03-05', paidVia: 'stripe', paymentUrl: 'https://buy.stripe.com/x',
+      reminders: [{ id: 'a', date: '2026-02-27', channel: 'email' }, { id: 'b', date: '2026-03-02', channel: 'auto', status: 'failed' }] })
+  ], 3, TODAY);
+  const lines = csv.trim().split('\r\n');
+  assert.equal(lines.length, 3);
+  assert.match(lines[0], /^Invoice #,Client,Client email/);
+  assert.match(lines[1], /^INV-1,Priya & Sam,.*,100\.00,USD,Paid,2026-03-05,Stripe,1,2026-02-27,Off,https:\/\/buy\.stripe\.com\/x,/);
+  assert.match(lines[2], /^INV-2,"Late, Client",.*,99\.50,EUR,Open,,,0,,Off,,/);
+});

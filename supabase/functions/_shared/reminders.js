@@ -15,6 +15,7 @@
    *                                   given up on after 3 attempts. In-flight/failed rows are left to claim().
    *   claim(args)                  -> log row id, or null if this step must not be sent
    *   send(email)                  -> provider message id (throws on failure)
+   *   paymentLink(invoice)         -> optional: the invoice's payment URL, or null
    *   markSent(id, providerId), markFailed(id, message)
    *   sleep(ms), now: Date, deadlineMs (optional), dryRun (optional)
    * config: { appUrl, functionsUrl, fromEmail, minIntervalMs }
@@ -56,7 +57,13 @@
 
       const stopUrl = config.appUrl.replace(/\/$/, '') + '/stop.html?t=' + encodeURIComponent(token);
       const oneClickUrl = config.functionsUrl.replace(/\/$/, '') + '/stop-reminders?t=' + encodeURIComponent(token);
-      const email = S.buildEmail(invoice, profile, due.step.tone, local.date, stopUrl, 'en-US');
+      // Add the invoice's Stripe payment link when the photographer has connected Stripe. If that
+      // fails, the reminder still goes out with the general payment link from Settings.
+      let payUrl = null;
+      if (deps.paymentLink) {
+        try { payUrl = await deps.paymentLink(invoice); } catch (e) { payUrl = null; }
+      }
+      const email = S.buildEmail(payUrl ? Object.assign({}, invoice, { paymentUrl: payUrl }) : invoice, profile, due.step.tone, local.date, stopUrl, 'en-US');
 
       // Stay under the email provider's rate limit.
       const wait = (config.minIntervalMs || 0) - (Date.now() - lastSend);

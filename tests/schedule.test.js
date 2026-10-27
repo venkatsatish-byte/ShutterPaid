@@ -214,3 +214,22 @@ test('dry run plans without claiming or sending', async () => {
   assert.deepEqual(report.planned, [{ invoiceId: 'inv-1', date: DUE, offset: 0, tone: 'friendly' }]);
   assert.equal(sent.length + log.size, 0);
 });
+
+test('reminders use the invoice payment link over the general one', () => {
+  const s = { ownerName: 'Alex', businessName: 'Rivera', paymentLink: 'https://paypal.me/alex' };
+  assert.match(S.buildReminder(inv(), s, 'friendly', DUE, 'en-US').body, /paypal\.me\/alex/);
+  const r = S.buildReminder(inv({ paymentUrl: 'https://buy.stripe.com/abc' }), s, 'friendly', DUE, 'en-US').body;
+  assert.match(r, /buy\.stripe\.com\/abc/);
+  assert.ok(!/paypal/.test(r));
+});
+
+test('run adds the Stripe payment link, and still sends if creating it fails', async () => {
+  const rows = [{ invoice: inv({ id: 'a' }), profile: profile({ paymentLink: 'https://paypal.me/alex' }), token: 'a' },
+    { invoice: inv({ id: 'b', clientEmail: 'b@example.com' }), profile: profile({ paymentLink: 'https://paypal.me/alex' }), token: 'b' }];
+  const { deps, sent } = fakeDeps(rows, { now: new Date('2026-03-20T12:00:00Z') });
+  deps.paymentLink = async (i) => { if (i.id === 'b') throw new Error('stripe down'); return 'https://buy.stripe.com/' + i.id; };
+  await runReminders(deps, CONFIG);
+  assert.equal(sent.length, 2);
+  assert.match(sent[0].text, /buy\.stripe\.com\/a/);
+  assert.match(sent[1].text, /paypal\.me\/alex/);
+});

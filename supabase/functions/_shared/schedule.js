@@ -155,7 +155,9 @@
     const shoot = inv.shootType ? inv.shootType.toLowerCase() + ' session' : 'session';
     const due = formatDate(inv.dueDate, locale);
     const n = daysBetween(today, inv.dueDate);
-    const pay = s.paymentLink ? '\n\nYou can pay quickly and securely here:\n' + s.paymentLink : '';
+    // The invoice's own Stripe payment link wins over the general payment link from Settings.
+    const link = inv.paymentUrl || s.paymentLink;
+    const pay = link ? '\n\nYou can pay quickly and securely here:\n' + link : '';
     const sig = '\n\n' + (s.signature || [s.ownerName, s.businessName].filter(Boolean).join('\n') || 'Thank you!');
     const biz = s.businessName ? ' from ' + s.businessName : '';
     const dueText = n > 0 ? 'is due on ' + due : n === 0 ? 'is due today' : 'was due on ' + due;

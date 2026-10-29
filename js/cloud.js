@@ -236,10 +236,12 @@
 
   async function runBatch(c, batch) {
     const first = batch[0];
+    // Most tables are keyed by id; booking_profiles is keyed by the photographer's user id.
+    const key = first.table === 'booking_profiles' ? 'user_id' : 'id';
     if (first.op === 'delete') {
-      return c.from(first.table).delete().in('id', batch.map((o) => o.id));
+      return c.from(first.table).delete().in(key, batch.map((o) => o.id));
     }
-    return c.from(first.table).upsert(batch.map((o) => o.row), { onConflict: 'id' });
+    return c.from(first.table).upsert(batch.map((o) => o.row), { onConflict: key });
   }
 
   // Push queued changes in order, batching neighbours that hit the same table the same way.
@@ -285,7 +287,8 @@
     // Rejected outright (validation or permission). Retrying won't help, so drop it and tell the
     // user; their local copy stays on this device.
     console.error('Sync rejected', error, op);
-    handlers.onStatus(Object.assign(info(), { rejected: error.message }));
+    const slugTaken = op.table === 'booking_profiles' && error.code === '23505';
+    handlers.onStatus(Object.assign(info(), { rejected: error.message, slugTaken }));
   }
 
   async function selectAll(c, table, columns) {
@@ -311,8 +314,45 @@
     return {
       invoices: Core.assemble(invoices, reminders),
       settings: profile.data ? Core.rowToSettings(profile.data) : null,
-      profile: profile.data
+      profile: profile.data,
+      booking: await fetchBooking(c)
     };
+  }
+
+  // Booking setup (profile, event types, weekly hours, blocked dates). Returns null if it can't be
+  // read, e.g. the booking migration hasn't been applied yet, so invoice sync keeps working.
+  async function fetchBooking(c) {
+    try {
+      const [profile, eventTypes, hours, blocked] = await Promise.all([
+        c.from('booking_profiles').select('*').eq('user_id', user.id).maybeSingle(),
+        selectAll(c, 'event_types', '*'),
+        selectAll(c, 'availability_rules', '*'),
+        selectAll(c, 'blocked_dates', '*')
+      ]);
+      if (profile.error) throw profile.error;
+      return { profile: profile.data, eventTypes, hours, blocked };
+    } catch (err) {
+      console.warn('Booking setup not available', err);
+      return null;
+    }
+  }
+
+  // Is this booking link free? (Photographers can't read each other's profiles.)
+  async function slugAvailable(slug) {
+    const c = await ensureClient();
+    const { data, error } = await c.rpc('booking_slug_available', { p_slug: slug });
+    if (error) throw error;
+    return !!data;
+  }
+
+  // Upload a profile photo to the public booking-photos bucket; returns its public URL.
+  async function uploadPhoto(blob) {
+    const c = await ensureClient();
+    if (!user) throw new Error('Not signed in');
+    const path = user.id + '/avatar-' + Date.now() + '.jpg';
+    const { error } = await c.storage.from('booking-photos').upload(path, blob, { contentType: 'image/jpeg', cacheControl: '31536000', upsert: false });
+    if (error) throw error;
+    return c.storage.from('booking-photos').getPublicUrl(path).data.publicUrl;
   }
 
   async function sync() {
@@ -373,6 +413,8 @@
     enqueue,
     pending,
     pendingCount: (id) => readOutbox(id).length + readParked(id).length,
+    slugAvailable,
+    uploadPhoto,
     parkedCount: () => readParked().length,
     requeueParked,
     invoke,

@@ -32,6 +32,10 @@
         window.__calls.push(table + ':' + q.kind + ':' + (q.rows ? q.rows.length : ''));
         if (offline()) return { data: null, error: NET };
         const d = db();
+        d[table] = d[table] || [];
+        // booking_profiles is keyed by user_id; everything else by id.
+        const key = table === 'booking_profiles' ? 'user_id' : 'id';
+        if (window.__failTables && window.__failTables.includes(table)) return { data: null, error: { code: '42P01', message: 'relation "' + table + '" does not exist' } };
         if (q.kind === 'select') {
           let rows = d[table].filter(own);
           q.filters.forEach((f) => { rows = rows.filter(f); });
@@ -45,7 +49,10 @@
           for (const r of q.rows) {
             if ((table === 'profiles' ? r.id : r.user_id) !== uid()) return { error: { code: '42501', message: 'rls' } };
             if (table === 'invoices' && !/^[A-Z]{3}$/.test(r.currency)) return { error: { code: '23514', message: 'check currency' } };
-            const i = d[table].findIndex((x) => x.id === r.id);
+            const i = d[table].findIndex((x) => x[key] === r[key]);
+            if (table === 'booking_profiles' && d[table].some((x) => x.slug === r.slug && x.user_id !== r.user_id)) {
+              return fail({ code: '23505', message: 'duplicate key value violates unique constraint "booking_profiles_slug_idx"' });
+            }
             const old = i >= 0 ? d[table][i] : null;
             if (table === 'invoices') {
               // Mirrors enforce_plan_limits() in the plans migration.
@@ -64,8 +71,8 @@
           saveDb(d); return { data: null, error: null };
         }
         if (q.kind === 'delete') {
-          const del = d[table].filter((r) => own(r) && q.ids.includes(r.id)).map((r) => r.id);
-          d[table] = d[table].filter((r) => !del.includes(r.id));
+          const del = d[table].filter((r) => own(r) && q.ids.includes(r[key])).map((r) => r[key]);
+          d[table] = d[table].filter((r) => !del.includes(r[key]));
           if (table === 'invoices') d.reminder_log = d.reminder_log.filter((r) => !del.includes(r.invoice_id));
           saveDb(d); return { data: null, error: null };
         }
@@ -93,7 +100,29 @@
         return { data: { url }, error: null };
       }
     };
-    return { auth, from, functions };
+    async function rpc(name, args) {
+      if (offline()) return { data: null, error: NET };
+      if (name === 'booking_slug_available') {
+        const uid = session && session.user.id;
+        return { data: !(db().booking_profiles || []).some((p) => p.slug === String(args.p_slug).toLowerCase() && p.user_id !== uid), error: null };
+      }
+      return { data: null, error: { code: 'PGRST202', message: 'unknown function ' + name } };
+    }
+    const storage = {
+      from(bucket) {
+        return {
+          async upload(path) {
+            if (offline()) return { error: NET };
+            window.__uploads = (window.__uploads || []).concat([bucket + '/' + path]);
+            return { data: { path }, error: null };
+          },
+          getPublicUrl(path) {
+            return { data: { publicUrl: 'https://fake.supabase.co/storage/v1/object/public/' + bucket + '/' + path } };
+          }
+        };
+      }
+    };
+    return { auth, from, functions, rpc, storage };
   }
   window.supabase = { createClient };
 })();

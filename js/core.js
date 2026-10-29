@@ -293,12 +293,26 @@
     const invoices = new Set();
     const reminders = new Set();
     let settings = false;
+    const rows = {}; // table -> Set of ids, for every table
     ops.forEach((op) => {
       if (op.table === 'invoices') invoices.add(op.id);
       else if (op.table === 'reminder_log') reminders.add(op.id);
       else if (op.table === 'profiles') settings = true;
+      (rows[op.table] = rows[op.table] || new Set()).add(op.id);
     });
-    return { invoices, reminders, settings };
+    return { invoices, reminders, settings, rows, has: (table, id) => !!(rows[table] && rows[table].has(id)) };
+  }
+
+  // Merge a flat list (e.g. event types) the same way as invoices: the server wins, except for
+  // rows with changes still waiting to upload on this device.
+  function mergeRows(local, remote, pendingIds) {
+    const pending = pendingIds || new Set();
+    const localById = {};
+    local.forEach((r) => { localById[r.id] = r; });
+    const out = remote.map((r) => (pending.has(r.id) && localById[r.id] ? localById[r.id] : r));
+    const seen = new Set(remote.map((r) => r.id));
+    local.forEach((r) => { if (!seen.has(r.id) && pending.has(r.id)) out.push(r); });
+    return out;
   }
 
   // Combine what the server returned with what this device has not uploaded yet.
@@ -412,7 +426,7 @@
     isUuid, uuid, normalizeInvoice, fingerprint, planUpload, mergeSettingsForUpload, hasLocalData,
     invoiceToRow, rowToInvoice, reminderToRow, rowToReminder, settingsToRow, rowToSettings, assemble,
     INVOICE_COLUMNS, REMINDER_COLUMNS,
-    coalesceOps, pendingKeys, mergeRemote, isTransientError, planLimitError,
+    coalesceOps, pendingKeys, mergeRemote, mergeRows, isTransientError, planLimitError,
     FREE_ACTIVE_LIMIT, planFromProfile, isPro, activeCount, fitToPlan, csvCell, toCSV
   };
 });

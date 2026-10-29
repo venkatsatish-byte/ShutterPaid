@@ -29,6 +29,7 @@
   <nav class="tabbar" aria-label="App sections">
     <button data-view="dashboard" class="active"><span class="ti">🏠</span>Dashboard</button>
     <button data-view="invoices"><span class="ti">🧾</span>Invoices</button>
+    <button data-view="booking" hidden><span class="ti">📅</span>Bookings</button>
     <button data-view="settings"><span class="ti">⚙️</span>Settings</button>
   </nav>
 
@@ -68,6 +69,122 @@
       </div>
       <div class="panel">
         <ul class="list" id="invoiceList"></ul>
+      </div>
+    </section>
+
+    <!-- Booking setup (signed-in photographers) -->
+    <section class="view" id="view-booking" hidden>
+      <h1>Bookings</h1>
+      <p class="sub">Let clients pick a time and book a shoot with you online.</p>
+
+      <div class="panel pad" id="bkStatusPanel">
+        <div class="bk-status">
+          <div>
+            <h2 class="panel-title">Your booking page</h2>
+            <p class="sub" id="bkStatusText" style="margin:0"></p>
+          </div>
+          <label class="switch"><input type="checkbox" id="bkAccepting"><span class="switch-ui" aria-hidden="true"></span><span>Accept bookings</span></label>
+        </div>
+        <ul class="bk-checklist" id="bkChecklist"></ul>
+        <div class="bk-link" id="bkLinkRow" hidden>
+          <code id="bkLink"></code>
+          <button class="btn btn-sm" id="bkCopyLink" type="button">Copy link</button>
+        </div>
+        <p class="hint" id="bkLinkNote" style="margin:8px 0 0" hidden>Your public booking page goes live in the next update. You can set everything up now.</p>
+      </div>
+
+      <div class="panel pad">
+        <h2 class="panel-title">Profile</h2>
+        <form class="form" id="bkProfileForm" novalidate>
+          <div class="bk-photo">
+            <img id="bkPhoto" alt="" width="72" height="72" hidden>
+            <div class="bk-photo-empty" id="bkPhotoEmpty" aria-hidden="true">📷</div>
+            <div class="toolbar" style="margin:0">
+              <label class="btn btn-sm" for="bkPhotoInput">Upload photo</label>
+              <input type="file" id="bkPhotoInput" accept="image/jpeg,image/png,image/webp" class="visually-hidden">
+              <button class="btn btn-sm btn-ghost" id="bkPhotoRemove" type="button" hidden>Remove</button>
+            </div>
+          </div>
+          <label>Display name<input name="displayName" maxlength="80" required placeholder="Rivera Photography"></label>
+          <label>Booking link
+            <span class="slug-field"><span class="slug-prefix" id="bkSlugPrefix">/book/</span><input name="slug" maxlength="40" required autocapitalize="off" spellcheck="false" placeholder="rivera-photography" aria-describedby="bkSlugHelp"></span>
+            <span class="hint" id="bkSlugHelp">Lowercase letters, numbers and hyphens.</span>
+          </label>
+          <label>Short bio <span class="hint"><span id="bkBioCount">0</span>/600</span><textarea name="bio" maxlength="600" placeholder="Wedding and family photographer in Austin. I love natural light and candid moments."></textarea></label>
+          <label>Time zone <span class="hint">Your working hours are in this time zone</span>
+            <input name="timeZone" list="tzList" autocomplete="off" spellcheck="false" required>
+          </label>
+          <p class="form-error" id="bkProfileError" role="alert"></p>
+          <div class="dialog-actions" style="justify-content:flex-start"><button class="btn btn-primary" type="submit">Save profile</button></div>
+        </form>
+      </div>
+
+      <div class="panel pad">
+        <div class="panel-head" style="padding:0 0 8px">
+          <h2 class="panel-title" style="margin:0">Event types</h2>
+          <button class="btn btn-sm btn-primary" id="bkAddType" type="button">+ Add event type</button>
+        </div>
+        <ul class="list" id="bkTypeList"></ul>
+      </div>
+
+      <div class="panel pad">
+        <h2 class="panel-title">Availability</h2>
+        <form class="form" id="bkHoursForm" novalidate>
+          <fieldset class="fieldset">
+            <legend>Weekly hours</legend>
+            <div id="bkWeek" class="bk-week"></div>
+          </fieldset>
+          <div class="form-row">
+            <label>Minimum notice
+              <select name="minNotice">
+                <option value="0">No minimum</option>
+                <option value="120">2 hours</option>
+                <option value="720">12 hours</option>
+                <option value="1440">24 hours</option>
+                <option value="2880">2 days</option>
+                <option value="4320">3 days</option>
+                <option value="10080">1 week</option>
+                <option value="20160">2 weeks</option>
+              </select>
+            </label>
+            <label>Book up to (days ahead)<input name="maxDaysAhead" type="number" min="1" max="730" inputmode="numeric" required></label>
+            <label>Max bookings per day <span class="hint">Blank for no limit</span><input name="maxPerDay" type="number" min="1" max="50" inputmode="numeric" placeholder="No limit"></label>
+          </div>
+          <p class="form-error" id="bkHoursError" role="alert"></p>
+          <div class="dialog-actions" style="justify-content:flex-start"><button class="btn btn-primary" type="submit">Save availability</button></div>
+        </form>
+      </div>
+
+      <div class="panel pad">
+        <h2 class="panel-title">Days off</h2>
+        <p class="sub" style="margin-bottom:12px">Vacations and other dates when clients can't book.</p>
+        <ul class="list" id="bkBlockedList"></ul>
+        <form class="form bk-blocked-form" id="bkBlockedForm" novalidate>
+          <div class="form-row">
+            <label>First day<input name="startDate" type="date" required></label>
+            <label>Last day<input name="endDate" type="date" required></label>
+          </div>
+          <label>Note <span class="hint">Only you see this</span><input name="note" maxlength="200" placeholder="Summer vacation"></label>
+          <p class="form-error" id="bkBlockedError" role="alert"></p>
+          <div class="dialog-actions" style="justify-content:flex-start"><button class="btn btn-sm" type="submit">Add days off</button></div>
+        </form>
+      </div>
+
+      <div class="panel pad">
+        <h2 class="panel-title">Cancellation &amp; refund policy</h2>
+        <p class="sub" style="margin-bottom:12px">Clients must accept this when they book. An event type can have its own policy instead.</p>
+        <form class="form" id="bkPolicyForm" novalidate>
+          <div class="md-editor" data-md>
+            <div class="md-tabs" role="tablist">
+              <button type="button" role="tab" aria-selected="true" data-md-tab="write">Write</button>
+              <button type="button" role="tab" aria-selected="false" data-md-tab="preview">Preview</button>
+            </div>
+            <textarea name="policy" maxlength="4000" rows="6" aria-label="Cancellation and refund policy" placeholder="Advances are refundable up to 14 days before the session. After that, they can be moved to a new date once."></textarea>
+            <div class="md-preview" hidden></div>
+          </div>
+          <p class="hint" style="margin:0">Formatting: **bold**, *italic*, - lists, [link text](https://…)</p>
+          <div class="dialog-actions" style="justify-content:flex-start"><button class="btn btn-primary" type="submit">Save policy</button></div>
+        </form>
       </div>
     </section>
 
@@ -290,6 +407,89 @@
     </div>
   </dialog>
 
+  <!-- Event type dialog -->
+  <dialog id="etDialog" aria-labelledby="etTitle">
+    <form class="dialog-inner form" id="etForm" novalidate>
+      <h2 id="etTitle">New event type</h2>
+      <input type="hidden" name="id">
+      <label id="etPresetRow">Start from
+        <select name="preset">
+          <option value="">Blank</option>
+          <option value="wedding">Wedding</option>
+          <option value="portrait">Portrait session</option>
+          <option value="maternity">Maternity</option>
+          <option value="event">Event coverage</option>
+          <option value="consult">Online consultation</option>
+        </select>
+      </label>
+      <label>Name<input name="name" maxlength="80" required placeholder="Portrait session"></label>
+      <label>Short description <span class="hint">Shown when clients choose what to book</span><textarea name="description" maxlength="1000" rows="2"></textarea></label>
+      <div class="form-row">
+        <label>Duration (minutes)<input name="durationMinutes" type="number" min="15" max="1440" step="5" inputmode="numeric" required></label>
+        <label>Buffer before (min)<input name="bufferBefore" type="number" min="0" max="480" step="5" inputmode="numeric"></label>
+        <label>Buffer after (min)<input name="bufferAfter" type="number" min="0" max="480" step="5" inputmode="numeric"></label>
+      </div>
+      <p class="hint" style="margin:-6px 0 0">Buffers keep time free around a booking for travel or setup. Clients don't see them.</p>
+      <div class="form-row">
+        <label>Location
+          <select name="locationType">
+            <option value="studio">Studio</option>
+            <option value="customer_address">Customer's address</option>
+            <option value="outdoor">Outdoor location</option>
+            <option value="online">Online consultation</option>
+          </select>
+        </label>
+        <label>Location details <span class="hint">Address, meeting point or call info</span><input name="locationDetails" maxlength="500"></label>
+      </div>
+      <div class="form-row">
+        <label>Total price<input name="price" type="number" min="0" step="0.01" inputmode="decimal" required></label>
+        <label>Currency
+          <select name="currency">
+            <option value="USD">USD $</option><option value="EUR">EUR €</option><option value="GBP">GBP £</option>
+            <option value="INR">INR ₹</option><option value="AUD">AUD $</option><option value="CAD">CAD $</option>
+          </select>
+        </label>
+      </div>
+
+      <fieldset class="fieldset">
+        <legend>Advance payment</legend>
+        <label class="check"><input type="radio" name="depositMode" value="none"> No advance</label>
+        <label class="check"><input type="radio" name="depositMode" value="optional"> Optional advance: clients can pay part now, or book without paying</label>
+        <label class="check is-disabled"><input type="radio" name="depositMode" value="required" disabled> Required advance (coming later)</label>
+        <div class="form-row" id="etDepositFields">
+          <label>Advance type
+            <select name="depositType">
+              <option value="percent">Percentage of price</option>
+              <option value="fixed">Fixed amount</option>
+            </select>
+          </label>
+          <label><span id="etDepositLabel">Percentage</span><input name="depositValue" type="number" min="0" step="0.01" inputmode="decimal"></label>
+        </div>
+        <p class="hint" id="etDepositSummary" style="margin:0" aria-live="polite"></p>
+      </fieldset>
+
+      <label>Instructions for clients <span class="hint">Sent when they book: what to wear and bring, arrival time, parking, shot-list form…</span></label>
+      <div class="md-editor" data-md>
+        <div class="md-tabs" role="tablist">
+          <button type="button" role="tab" aria-selected="true" data-md-tab="write">Write</button>
+          <button type="button" role="tab" aria-selected="false" data-md-tab="preview">Preview</button>
+        </div>
+        <textarea name="instructions" maxlength="8000" rows="7" aria-label="Instructions for clients"></textarea>
+        <div class="md-preview" hidden></div>
+      </div>
+      <p class="hint" style="margin:-6px 0 0">Formatting: **bold**, *italic*, - lists, [link text](https://…)</p>
+      <label>Cancellation policy for this event type <span class="hint">Leave blank to use your general policy</span><textarea name="cancellationPolicy" maxlength="4000" rows="3"></textarea></label>
+      <label class="check"><input type="checkbox" name="active"> Clients can book this event type</label>
+      <p class="form-error" id="etError" role="alert"></p>
+      <div class="dialog-actions">
+        <button class="btn btn-ghost btn-danger" type="button" id="etDelete" hidden>Delete</button>
+        <span style="flex:1"></span>
+        <button class="btn btn-ghost" type="button" id="etCancel">Cancel</button>
+        <button class="btn btn-primary" type="submit">Save event type</button>
+      </div>
+    </form>
+  </dialog>
+
   <!-- Invoice document (PDF) -->
   <dialog id="docDialog" class="doc-dialog" aria-labelledby="docTitle">
     <div class="dialog-inner">
@@ -346,8 +546,11 @@
   <script src="js/analytics.js"></script>
   <script src="js/core.js"></script>
   <script src="js/schedule.js"></script>
+  <script src="js/booking.js"></script>
+  <script src="js/markdown.js"></script>
   <script src="js/cloud.js"></script>
   <script src="js/pwa.js"></script>
   <script src="js/app.js"></script>
+  <script src="js/booking-setup.js"></script>
 </body>
 </html>

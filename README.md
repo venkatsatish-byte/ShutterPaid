@@ -17,6 +17,7 @@ ShutterPaid is an invoice reminder app for photographers. It runs as a website a
 - **PDF invoices**: a clean invoice per shoot with your business details, saved with the browser's "Save as PDF" (works offline, any language or currency symbol)
 - **Online payments** (signed in): connect your own Stripe account and each invoice gets a one-time payment link, added to reminders and PDFs. When the client pays, the invoice is marked paid and reminders stop.
 - **CSV export** of all invoices for spreadsheets and accountants
+- **Bookings (in progress)**: a *Bookings* tab where signed-in photographers set up a public booking page (link, photo, bio, time zone), event types (duration, buffers, location, price, optional advance, client instructions, cancellation policy), weekly hours, booking window and days off. The public booking page, slot search, payments and booking emails come in the next phases.
 - **Backup**: export or import your data as JSON, or load sample data to try the app out
 
 ## Run locally
@@ -142,7 +143,19 @@ Photographers connect **their own** Stripe account; clients pay them directly, a
 - If Stripe isn't connected (or link creation fails), reminders and PDFs fall back to the general payment link in Settings.
 - ShutterPaid takes no platform fee. To add one later, set `application_fee_amount` on the payment link (see `supabase/functions/_shared/paylinks.js`) and update the terms.
 
-### 7. Deploy (Vercel or Netlify)
+### 7. Bookings: photographer setup
+1. **Apply the migration** `supabase/migrations/20261101000000_booking_setup.sql` (`npx supabase db push`). It creates `booking_profiles`, `event_types`, `availability_rules` and `blocked_dates` with Row Level Security (photographers see only their own rows), the `booking_slug_available()` check, and a public **`booking-photos`** Storage bucket for profile photos (2 MB limit, JPEG/PNG/WebP; each photographer can only write inside a folder named after their user id).
+2. **Check Storage is enabled** in your Supabase project (it is by default). The app crops and shrinks photos to 512×512 JPEG before uploading.
+3. **Use it.** Sign in, open the **Bookings** tab, save your profile and booking link, add an event type, save your weekly hours, then switch on *Accept bookings*.
+
+How it fits together:
+- Setup data syncs exactly like invoices: saved on the device first, queued, and uploaded when online. If the booking migration hasn't been applied yet, the rest of the app keeps syncing normally.
+- Booking links are unique across all photographers. The app checks with `booking_slug_available()` before saving, and a unique index guarantees it. Reserved words (like `admin` or `book`) can't be used.
+- The rules (link format, advance limits, hours) are in `js/booking.js` and mirrored by database constraints, so a bad value can't be saved even if the browser check is bypassed.
+- Event instructions and policies use a small Markdown subset (`js/markdown.js`): **bold**, *italic*, lists and `http(s)`/`mailto` links. Everything is escaped, so text can never inject HTML or scripts into client pages or emails.
+- Customers never read these tables directly; the public booking page will use Edge Functions (next phase).
+
+### 8. Deploy (Vercel or Netlify)
 Both configs are included (`vercel.json`, `netlify.toml`). They run `node scripts/build.mjs`, which:
 - writes `js/config.js` from the `SUPABASE_URL`, `SUPABASE_ANON_KEY` and `PLAUSIBLE_DOMAIN` environment variables,
 - stamps the service worker cache name with the commit, so every deploy reaches users, and
@@ -174,7 +187,7 @@ The service worker pre-caches the app for offline use. When a new version is dep
 ```bash
 npm test             # unit tests: dates, due status, sync merging, the reminder scheduler and the send run (no install needed)
 npm i -D playwright && npx playwright install chromium
-npm run test:e2e     # browser tests: local-only mode, sign-in, upload, offline queue, update prompt, reminders, stop page, plans and upgrade, legal pages, beta list, analytics, SEO, CSV, PDF, Stripe Connect and payment links
+npm run test:e2e     # browser tests: local-only mode, sign-in, upload, offline queue, update prompt, reminders, stop page, plans and upgrade, legal pages, beta list, analytics, SEO, CSV, PDF, Stripe Connect, payment links and booking setup
 ```
 The browser tests use an in-page fake of Supabase (`tests/e2e/fake-supabase.js`), so they need no real project.
 
@@ -191,6 +204,9 @@ app.html               The app (dashboard, invoices, settings, sign-in)
 css/styles.css         Shared styles (automatic light and dark mode)
 js/core.js             Pure logic (dates, status, sync helpers), shared with the tests
 js/schedule.js         Reminder schedule rules and email copy (shared with the Edge Function)
+js/booking.js          Booking rules: links, advances, hours, row mapping (shared with later booking pages/functions)
+js/markdown.js         Safe Markdown subset for event instructions and policies
+js/booking-setup.js    Bookings tab: booking page, event types, hours, days off, policy
 js/cloud.js            Supabase auth and the offline sync queue
 js/app.js              App UI and local cache
 js/pwa.js              Service worker registration, update prompt, install button

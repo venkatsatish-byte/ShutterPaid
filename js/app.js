@@ -49,12 +49,19 @@
     const out = {
       invoices: data && Array.isArray(data.invoices) ? data.invoices : [],
       settings: Object.assign({}, defaultSettings, data && data.settings),
-      plan: data && data.plan ? data.plan : null
+      plan: data && data.plan ? data.plan : null,
+      // Booking setup (accounts only): { profile, eventTypes, hours, blocked }. profile is null
+      // until the photographer saves their booking page for the first time.
+      booking: data && data.booking ? data.booking : emptyBooking()
     };
     // Upgrade ids from older versions to UUIDs so they can be synced without duplicates.
     const changed = out.invoices.map(Core.normalizeInvoice).some(Boolean);
     if (changed) write(key, out);
     return out;
+  }
+
+  function emptyBooking() {
+    return { profile: null, eventTypes: [], hours: [], blocked: [] };
   }
 
   function write(key, data) {
@@ -78,6 +85,7 @@
     state.invoices = data.invoices;
     state.settings = data.settings;
     state.plan = data.plan;
+    state.booking = data.booking;
   }
 
   // ---------- Plans ----------
@@ -114,6 +122,15 @@
 
   function queueReminder(inv, r) {
     if (userId()) Cloud.enqueue({ table: 'reminder_log', op: 'upsert', id: r.id, row: Core.reminderToRow(inv.id, r, userId()) });
+  }
+
+  // Generic queue helpers for the booking tables.
+  function queueRow(table, id, row) {
+    if (userId()) Cloud.enqueue({ table, op: 'upsert', id, row });
+  }
+
+  function queueDelete(table, id) {
+    if (userId()) Cloud.enqueue({ table, op: 'delete', id });
   }
 
   function queueSettings() {
@@ -450,6 +467,10 @@
     renderAccount();
     renderPlan();
     renderPayments();
+    // The Bookings tab needs an account: the booking page is public and lives on the server.
+    const bookingTab = $('.tabbar [data-view=booking]');
+    bookingTab.hidden = !Cloud.enabled || !userId();
+    if (bookingTab.hidden && currentView === 'booking') showView('dashboard');
   }
 
   // ---------- Account & sync status ----------
@@ -502,6 +523,7 @@
     $$('.view').forEach((v) => { v.hidden = v.id !== 'view-' + name; });
     $$('.tabbar button').forEach((b) => b.classList.toggle('active', b.dataset.view === name));
     if (name === 'settings') renderSettings();
+    if (name === 'booking' && window.SPBookingSetup) window.SPBookingSetup.render();
     window.scrollTo(0, 0);
   }
 
@@ -1191,6 +1213,7 @@
     }
     const pending = Cloud.pending();
     state.invoices = Core.mergeRemote(state.invoices, remote.invoices, pending);
+    if (remote.booking) mergeBooking(remote.booking, pending);
     if (remote.settings && !pending.settings) {
       state.settings = Object.assign({}, defaultSettings, remote.settings);
       if (!remote.settings.timeZone) {
@@ -1205,9 +1228,25 @@
     if (currentView === 'settings' && !editing) renderSettings();
   }
 
+  // Server wins for booking setup too, except rows still waiting to upload from this device.
+  function mergeBooking(remote, pending) {
+    const B = window.SPBooking;
+    const b = state.booking;
+    const rows = (t) => pending.rows[t] || new Set();
+    // Unsaved edits live only in the form, so the stored profile simply follows the server.
+    if (!rows('booking_profiles').size) b.profile = remote.profile ? B.rowToProfile(remote.profile) : null;
+    b.eventTypes = Core.mergeRows(b.eventTypes, remote.eventTypes.map(B.rowToEventType), rows('event_types'))
+      .sort((x, y) => (x.sortOrder - y.sortOrder) || x.name.localeCompare(y.name));
+    b.hours = Core.mergeRows(b.hours, remote.hours.map(B.rowToHour), rows('availability_rules'));
+    b.blocked = Core.mergeRows(b.blocked, remote.blocked.map(B.rowToBlocked), rows('blocked_dates'))
+      .sort((x, y) => x.startDate.localeCompare(y.startDate));
+    if (currentView === 'booking' && window.SPBookingSetup) window.SPBookingSetup.render({ keepEdits: true });
+  }
+
   function onStatus(i) {
     syncInfo = i;
     renderAccount();
+    if (i.slugTaken) toast('That booking link was just taken. Please choose another one.');
     if (i.rejected) toast('Some changes couldn\'t be saved to your account.');
     if (i.limit) {
       toast(i.limit === 'PRO_REQUIRED'
@@ -1363,6 +1402,13 @@
       Cloud.sync();
     }, 3000);
   }
+
+  // Small internal API for the booking setup screen (js/booking-setup.js).
+  window.SPApp = {
+    state, save, toast, esc, money, prettyDate, userId, showView, renderAll,
+    queueRow, queueDelete, deviceTimeZone, todayISO,
+    currentView: () => currentView
+  };
 
   // ---------- Boot ----------
   renderAll();

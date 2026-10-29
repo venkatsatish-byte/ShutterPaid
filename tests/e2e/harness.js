@@ -14,6 +14,9 @@ const state = { swVersion: null }; // when swVersion is set, sw.js is served wit
 const server = http.createServer((req, res) => {
   let p = decodeURIComponent(new URL(req.url, BASE).pathname);
   if (p.endsWith('/')) p += 'index.html';
+  // Same redirect as vercel.json / netlify.toml: /book/<slug> -> book.html?p=<slug>.
+  const short = /^\/book\/([^/]+)\/?$/.exec(p);
+  if (short) { res.writeHead(302, { Location: '/book.html?p=' + encodeURIComponent(short[1]) }); return res.end(); }
   const file = path.join(ROOT, path.normalize(p));
   if (!file.startsWith(ROOT) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) { res.writeHead(404); return res.end(); }
   let body = fs.readFileSync(file);
@@ -32,8 +35,9 @@ const CONFIG = 'window.SP_CONFIG={supabaseUrl:"https://fake.supabase.co",supabas
 let failures = 0;
 const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) failures++; };
 
-async function ctx(browser, { cloud, mobile, scheme, config } = {}) {
-  const c = await browser.newContext(Object.assign({}, mobile ? devices['iPhone 13'] : {}, { colorScheme: scheme || 'dark', serviceWorkers: 'block' }));
+async function ctx(browser, { cloud, mobile, scheme, config, timezoneId, small } = {}) {
+  const c = await browser.newContext(Object.assign({}, mobile ? devices['iPhone 13'] : {}, small ? devices['iPhone SE'] : {},
+    { colorScheme: scheme || 'dark', serviceWorkers: 'block' }, timezoneId ? { timezoneId } : {}));
   await c.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: BASE }).catch(() => {});
   await c.route('**/js/config.js', (r) => r.fulfill({ contentType: 'text/javascript', body: config ? 'window.SP_CONFIG=' + JSON.stringify(config) + ';' : cloud ? CONFIG : 'window.SP_CONFIG={};' }));
   await c.route('https://cdn.jsdelivr.net/**', (r) => r.fulfill({ contentType: 'text/javascript', body: FAKE }));

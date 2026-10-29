@@ -46,7 +46,10 @@
       minNoticeMinutes: 1440,
       maxDaysAhead: 90,
       maxPerDay: '',
-      cancellationPolicy: ''
+      cancellationPolicy: '',
+      allowCancel: true,
+      allowReschedule: true,
+      changeCutoffHours: 24
     };
   }
 
@@ -56,8 +59,11 @@
     App.queueRow('booking_profiles', App.userId(), B.profileToRow(p, App.userId()));
   }
 
+  // Deployed with the build step (Vercel/Netlify), /book/<slug> redirects to book.html?p=<slug>.
+  // Elsewhere (e.g. GitHub Pages) the link uses book.html?p=<slug>.
   function bookingUrl(slug) {
-    return new URL('book/' + slug, document.baseURI).href;
+    const pretty = (window.SP_CONFIG || {}).prettyBookingUrls;
+    return new URL(pretty ? 'book/' + slug : 'book.html?p=' + encodeURIComponent(slug), document.baseURI).href;
   }
 
   function readiness() {
@@ -585,7 +591,14 @@
 
   function renderPolicy() {
     if (dirty.has('policy')) return;
-    policyForm.elements.policy.value = currentProfile().cancellationPolicy;
+    const p = currentProfile();
+    const f = policyForm.elements;
+    f.policy.value = p.cancellationPolicy;
+    f.allowCancel.checked = p.allowCancel !== false;
+    f.allowReschedule.checked = p.allowReschedule !== false;
+    const cutoff = String(p.changeCutoffHours == null ? 24 : p.changeCutoffHours);
+    if (![...f.changeCutoffHours.options].some((o) => o.value === cutoff)) f.changeCutoffHours.add(new Option(cutoff + ' hours before', cutoff));
+    f.changeCutoffHours.value = cutoff;
     resetMarkdown(policyForm);
   }
 
@@ -594,7 +607,13 @@
   policyForm.addEventListener('submit', (e) => {
     e.preventDefault();
     if (!savedProfile()) return App.toast('Save your profile first');
-    saveProfile(Object.assign({}, savedProfile(), { cancellationPolicy: policyForm.elements.policy.value.trim() }));
+    const f = policyForm.elements;
+    saveProfile(Object.assign({}, savedProfile(), {
+      cancellationPolicy: f.policy.value.trim(),
+      allowCancel: f.allowCancel.checked,
+      allowReschedule: f.allowReschedule.checked,
+      changeCutoffHours: Number(f.changeCutoffHours.value)
+    }));
     dirty.delete('policy');
     App.toast('Policy saved');
   });

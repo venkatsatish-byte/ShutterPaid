@@ -39,14 +39,21 @@ Deno.serve(async (req) => {
       db.from('event_types').select('*').eq('id', params.eventTypeId).eq('user_id', uid).maybeSingle(),
       db.from('availability_rules').select('weekday,start_time,end_time').eq('user_id', uid),
       db.from('blocked_dates').select('start_date,end_date').eq('user_id', uid),
-      db.from('bookings').select('start_at,block_start,block_end,status,expires_at')
+      db.from('bookings').select('id,start_at,block_start,block_end,status,expires_at')
         .eq('photographer_id', uid).in('status', ['confirmed', 'pending_payment'])
         .lt('block_start', new Date(win.loadTo).toISOString()).gt('block_end', new Date(win.loadFrom).toISOString()),
     ]);
     for (const r of [et, hours, blocked, bookings]) if (r.error) throw r.error;
 
+    // Rescheduling: the customer's own booking (found by its manage token) doesn't block new times.
+    let excludeBookingId: string | null = null;
+    if (params.token) {
+      const own = await db.from('bookings').select('id').eq('manage_token', params.token).eq('photographer_id', uid).maybeSingle();
+      if (own.error) throw own.error;
+      excludeBookingId = own.data?.id ?? null;
+    }
     const body = buildResponse(params, {
-      profileRow, eventTypeRow: et.data, hourRows: hours.data, blockedRows: blocked.data, bookingRows: bookings.data, now: Date.now(),
+      profileRow, eventTypeRow: et.data, hourRows: hours.data, blockedRows: blocked.data, bookingRows: bookings.data, now: Date.now(), excludeBookingId,
     });
     return json(body, 200, CORS);
   } catch (err) {

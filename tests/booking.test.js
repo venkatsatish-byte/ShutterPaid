@@ -64,7 +64,8 @@ test('blockedProblem', () => {
 test('row mapping round-trips', () => {
   const et = B.newEventType({ id: 'e1', name: 'Wedding', price: 2500, depositMode: 'optional', depositType: 'fixed', depositValue: 500, instructions: '**Bring** water' });
   assert.deepEqual(B.rowToEventType(B.eventTypeToRow(et, 'u1')), et);
-  const prof = { slug: 'venkat-photos', displayName: 'Venkat', photoUrl: '', bio: 'Hi', timeZone: 'America/New_York', accepting: true, minNoticeMinutes: 1440, maxDaysAhead: 90, maxPerDay: '', cancellationPolicy: 'x' };
+  const prof = { slug: 'venkat-photos', displayName: 'Venkat', photoUrl: '', bio: 'Hi', timeZone: 'America/New_York', accepting: true, minNoticeMinutes: 1440, maxDaysAhead: 90, maxPerDay: '', cancellationPolicy: 'x',
+    allowCancel: true, allowReschedule: false, changeCutoffHours: 48 };
   assert.deepEqual(B.rowToProfile(B.profileToRow(prof, 'u1')), prof);
   assert.equal(B.profileToRow(Object.assign({}, prof, { maxPerDay: 2 }), 'u1').max_per_day, 2);
   assert.deepEqual(B.rowToHour({ id: 'h', weekday: 1, start_time: '09:00:00', end_time: '17:30:00' }), { id: 'h', weekday: 1, start: '09:00', end: '17:30' });

@@ -22,7 +22,9 @@ const config = {
   supabaseUrl: process.env.SUPABASE_URL || '',
   supabaseAnonKey: process.env.SUPABASE_ANON_KEY || '',
   plausibleDomain: process.env.PLAUSIBLE_DOMAIN || '',
-  plausibleSrc: process.env.PLAUSIBLE_SRC || ''
+  plausibleSrc: process.env.PLAUSIBLE_SRC || '',
+  // /book/<slug> links work where the host redirects them to book.html (vercel.json, netlify.toml).
+  prettyBookingUrls: !!(process.env.VERCEL || process.env.NETLIFY || process.env.PRETTY_BOOKING_URLS)
 };
 
 if (config.supabaseUrl && !/^https:\/\//.test(config.supabaseUrl)) {

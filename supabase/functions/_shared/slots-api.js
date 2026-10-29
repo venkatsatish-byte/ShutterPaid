@@ -29,7 +29,9 @@
     if (!DATE.test(q.from || '') || !DATE.test(q.to || '') || q.to < q.from) throw new ApiError(400, 'Choose a date range.');
     const span = (Date.parse(q.to) - Date.parse(q.from)) / 86400000 + 1;
     if (span > S.MAX_RANGE_DAYS) throw new ApiError(400, 'Ask for at most ' + S.MAX_RANGE_DAYS + ' days at a time.');
-    return { slug, eventTypeId: q.event_type_id, tz, from: q.from, to: q.to };
+    // A manage token (for rescheduling) is optional.
+    const token = q.token && UUID.test(q.token) ? q.token : null;
+    return { slug, eventTypeId: q.event_type_id, tz, from: q.from, to: q.to, token };
   }
 
   // Midnight at the start of a customer-local date, as an instant (works on DST days too).
@@ -63,6 +65,8 @@
     const win = searchWindow(params);
     // Holds whose 10 minutes ran out no longer block anything, even before the cleanup job runs.
     const bookings = (data.bookingRows || [])
+      // When a customer reschedules, their own booking doesn't block the new time.
+      .filter((b) => !data.excludeBookingId || b.id !== data.excludeBookingId)
       .filter((b) => b.status === 'confirmed' || (b.status === 'pending_payment' && Date.parse(b.expires_at) > now))
       .map((b) => ({ startAt: b.start_at, blockStart: b.block_start, blockEnd: b.block_end }));
     const slots = S.availableSlots({

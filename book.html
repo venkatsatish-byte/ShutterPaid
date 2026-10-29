@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Book a session</title>
+  <meta name="description" content="Book a photography session online.">
+  <meta name="theme-color" content="#0f1020">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body class="book-body">
+  <a class="skip-link" href="#bookMain">Skip to booking</a>
+  <main class="container book-main" id="bookMain" tabindex="-1">
+    <!-- Loading / errors -->
+    <div class="panel pad book-status" id="bookStatus" role="status" aria-live="polite">Loading…</div>
+
+    <!-- Photographer -->
+    <header class="book-who" id="bookWho" hidden>
+      <img id="whoPhoto" alt="" width="64" height="64" hidden>
+      <div>
+        <h1 id="whoName"></h1>
+        <p class="sub" id="whoBio"></p>
+      </div>
+    </header>
+
+    <!-- Booking flow -->
+    <section id="flow" hidden aria-labelledby="stepTitle">
+      <ol class="book-steps" aria-label="Booking steps">
+        <li data-step="1">Session</li>
+        <li data-step="2">Date &amp; time</li>
+        <li data-step="3">Your details</li>
+        <li data-step="4">Review</li>
+      </ol>
+      <h2 class="book-step-title" id="stepTitle" tabindex="-1"></h2>
+      <p class="form-error book-error" id="flowError" role="alert"></p>
+
+      <!-- Step 1 -->
+      <div class="book-step" data-panel="1">
+        <div class="book-types" id="typeList" role="list"></div>
+      </div>
+
+      <!-- Step 2 -->
+      <div class="book-step" data-panel="2" hidden>
+        <div class="book-chosen" id="chosenType"></div>
+        <div class="book-tz">
+          <span id="tzLabel"></span>
+          <label class="visually-hidden" for="tzSelect">Time zone</label>
+          <select id="tzSelect"></select>
+        </div>
+        <div class="book-cal-wrap">
+          <div class="book-cal" id="calendar">
+            <div class="book-cal-head">
+              <button type="button" class="btn btn-sm btn-ghost" id="calPrev" aria-label="Previous month">‹</button>
+              <h3 id="calMonth" aria-live="polite"></h3>
+              <button type="button" class="btn btn-sm btn-ghost" id="calNext" aria-label="Next month">›</button>
+            </div>
+            <div class="book-cal-grid" role="grid" aria-labelledby="calMonth" id="calGrid"></div>
+            <p class="hint" id="calHint" style="margin:8px 0 0"></p>
+          </div>
+          <div class="book-times" id="timesBox">
+            <h3 id="timesTitle">Choose a date</h3>
+            <div class="book-time-list" id="timeList" role="list" aria-labelledby="timesTitle"></div>
+          </div>
+        </div>
+        <div class="book-nav"><button type="button" class="btn btn-ghost" data-back>Back</button></div>
+      </div>
+
+      <!-- Step 3 -->
+      <form class="book-step form" data-panel="3" id="detailsForm" hidden novalidate>
+        <div class="book-chosen" id="chosenTime"></div>
+        <div class="form-row">
+          <label for="fName">Your name<input id="fName" name="name" autocomplete="name" required maxlength="120" aria-describedby="fNameErr"><span class="field-error" id="fNameErr"></span></label>
+          <label for="fEmail">Email<input id="fEmail" name="email" type="email" autocomplete="email" required maxlength="320" aria-describedby="fEmailErr"><span class="field-error" id="fEmailErr"></span></label>
+        </div>
+        <label for="fPhone">Phone <span class="hint">Optional</span><input id="fPhone" name="phone" type="tel" autocomplete="tel" maxlength="40" aria-describedby="fPhoneErr"><span class="field-error" id="fPhoneErr"></span></label>
+        <label for="fAddress" id="addressRow">Event address<textarea id="fAddress" name="address" rows="2" autocomplete="street-address" maxlength="500" aria-describedby="fAddressErr"></textarea><span class="field-error" id="fAddressErr"></span></label>
+        <label for="fNotes">Notes for the photographer <span class="hint">Optional</span><textarea id="fNotes" name="notes" rows="3" maxlength="2000"></textarea></label>
+        <label class="hp" aria-hidden="true">Leave this empty<input name="website" tabindex="-1" autocomplete="off"></label>
+        <div class="book-policy" id="policyBox"></div>
+        <label class="check" for="fAccept"><input type="checkbox" id="fAccept" name="accept" aria-describedby="fAcceptErr"> I accept the cancellation policy</label>
+        <span class="field-error" id="fAcceptErr"></span>
+        <div class="book-nav">
+          <button type="button" class="btn btn-ghost" data-back>Back</button>
+          <button type="submit" class="btn btn-primary">Continue</button>
+        </div>
+      </form>
+
+      <!-- Step 4 -->
+      <div class="book-step" data-panel="4" hidden>
+        <dl class="book-review" id="review"></dl>
+        <fieldset class="fieldset book-pay" id="payChoice" hidden>
+          <legend>Payment</legend>
+          <label class="check"><input type="radio" name="pay" value="advance"> <span id="payAdvanceLabel"></span></label>
+          <label class="check"><input type="radio" name="pay" value="later"> <span id="payLaterLabel"></span></label>
+          <span class="field-error" id="payErr"></span>
+        </fieldset>
+        <p class="hint" id="payNote"></p>
+        <div class="book-nav">
+          <button type="button" class="btn btn-ghost" data-back>Back</button>
+          <button type="button" class="btn btn-primary" id="confirmBtn">Confirm booking</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Confirmation and manage view -->
+    <section id="done" hidden aria-labelledby="doneTitle">
+      <h2 id="doneTitle" tabindex="-1"></h2>
+      <p class="sub" id="doneSub"></p>
+      <dl class="book-review" id="doneSummary"></dl>
+      <div class="toolbar" id="calButtons">
+        <button type="button" class="btn btn-sm" id="icsBtn">Add to calendar (.ics)</button>
+        <a class="btn btn-sm" id="gcalLink" target="_blank" rel="noopener">Google Calendar</a>
+      </div>
+      <div class="panel pad" id="manageLinkBox">
+        <h3 class="panel-title">Your booking link</h3>
+        <p class="sub" style="margin:0 0 10px">Use it to view, reschedule or cancel. We've also emailed it to you.</p>
+        <div class="bk-link"><code id="manageLink"></code><button type="button" class="btn btn-sm" id="copyManage">Copy link</button></div>
+      </div>
+      <div class="panel pad" id="instructionsBox" hidden>
+        <h3 class="panel-title">Before your session</h3>
+        <div class="md-preview book-md" id="instructions"></div>
+      </div>
+      <div class="panel pad" id="donePolicyBox" hidden>
+        <h3 class="panel-title">Cancellation policy</h3>
+        <div class="md-preview book-md" id="donePolicy"></div>
+      </div>
+      <div class="panel pad" id="manageActions" hidden>
+        <h3 class="panel-title">Change your booking</h3>
+        <p class="sub" id="manageRule" style="margin:0 0 12px"></p>
+        <div class="toolbar">
+          <button type="button" class="btn btn-sm" id="rescheduleBtn">Reschedule</button>
+          <button type="button" class="btn btn-sm btn-ghost btn-danger" id="cancelBtn">Cancel booking</button>
+        </div>
+        <form class="form" id="cancelForm" hidden novalidate>
+          <label for="cancelReason">Reason <span class="hint">Optional, shared with the photographer</span><textarea id="cancelReason" rows="2" maxlength="500"></textarea></label>
+          <div class="toolbar">
+            <button type="submit" class="btn btn-sm btn-danger">Yes, cancel my booking</button>
+            <button type="button" class="btn btn-sm btn-ghost" id="cancelKeep">Keep my booking</button>
+          </div>
+        </form>
+      </div>
+      <div class="panel pad" id="othersBox" hidden>
+        <h3 class="panel-title">Your other bookings</h3>
+        <ul class="list" id="othersList"></ul>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-links">
+      <span>Bookings by <a href="./">ShutterPaid</a></span>
+      <a href="privacy.html">Privacy</a>
+      <a href="terms.html">Terms</a>
+    </div>
+  </footer>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="js/config.js"></script>
+  <script src="js/analytics.js"></script>
+  <script src="js/booking.js"></script>
+  <script src="js/markdown.js"></script>
+  <script src="js/ics.js"></script>
+  <script src="js/book.js"></script>
+  <script src="js/pwa.js"></script>
+</body>
+</html>

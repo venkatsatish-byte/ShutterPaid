@@ -2,6 +2,12 @@
   command = "node scripts/build.mjs"
   publish = "."
 
+# Short public booking links: /book/<slug> -> book.html?p=<slug>
+[[redirects]]
+  from = "/book/:slug"
+  to = "/book.html?p=:slug"
+  status = 302
+
 [[headers]]
   for = "/sw.js"
   [headers.values]

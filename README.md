@@ -117,7 +117,7 @@ Do all of this in **test mode** first, then repeat it in live mode at launch.
 ### 5. Launch basics: legal pages, analytics, beta list, SEO
 1. **Legal review.** `privacy.html` and `terms.html` are drafts with a banner saying so, and `noindex` so search engines skip them. Fill in every `[square bracket]` (company name, address, governing law, refund policy, retention periods) with your lawyer. When they're final, remove the `draft-banner` block and the `<meta name="robots" content="noindex">` line from both, and add both pages to `sitemap.xml`.
 2. **Site URL and support email.** Set `SITE_URL` (e.g. `https://shutterpaid.com`) and `SUPPORT_EMAIL` in Vercel/Netlify. The deploy build replaces the `https://your-domain.com` and `support@your-domain.com` placeholders in the pages, `sitemap.xml` and `robots.txt`. Make sure the support address actually receives mail.
-3. **Analytics (Plausible).** Create a site at [plausible.io](https://plausible.io) for your domain and set `PLAUSIBLE_DOMAIN` to it. Under *Site settings → Goals*, add custom-event goals named exactly `Signup`, `Upgrade started`, `Upgrade` and `Beta signup`. Plausible uses no cookies, so no cookie banner is needed for it. With `PLAUSIBLE_DOMAIN` empty, nothing loads.
+3. **Analytics (Plausible).** Create a site at [plausible.io](https://plausible.io) for your domain and set `PLAUSIBLE_DOMAIN` to it. Under *Site settings → Goals*, add custom-event goals named exactly `Signup`, `Upgrade started`, `Upgrade`, `Beta signup` and `Booking`. Plausible uses no cookies, so no cookie banner is needed for it. With `PLAUSIBLE_DOMAIN` empty, nothing loads.
 4. **Beta list.** The migration creates `beta_signups`. Visitors can add an email but nobody can read the list through the API: view or export it in Supabase → Table Editor → `beta_signups`. The form is hidden when Supabase isn't configured (e.g. on GitHub Pages).
 5. **Search and sharing.** After the first deploy, submit `https://<your-domain>/sitemap.xml` in Google Search Console, and check the share preview with a tool such as the Facebook Sharing Debugger or opengraph.xyz. The share image is `og-image.png` (1200×630).
 
@@ -175,7 +175,28 @@ How slots are calculated (`js/slots.js`, shared with the function):
 - Holds whose time ran out are ignored straight away, even before the cleanup job runs.
 - Customers never query the tables; the function reads them with the service role and returns only what the booking page needs. Photographers can read and update their own bookings, but not prices, advances, holds, invoice links, payments or customers' manage tokens.
 
-### 9. Deploy (Vercel or Netlify)
+### 9. Bookings: the public booking page
+Customers book at **`/book/<your-link>`** (Vercel/Netlify redirect it to `book.html?p=<your-link>`; on hosts without the redirect, such as GitHub Pages, share `book.html?p=<your-link>`, which is what the Bookings tab shows there).
+1. **Apply the migration** `20261103000000_booking_page.sql` (`npx supabase db push`). It adds the customer change rules (cancel online, reschedule online, and how many hours before the session changes close), `create_booking()` and `reschedule_booking()` (they lock per photographer so the daily limit holds under simultaneous requests; overlaps are still stopped by the database constraint), and keeps invoices in step: a reschedule moves the invoice date; a cancellation removes the invoice, or turns it into a paid invoice for an advance that was kept.
+2. **Deploy the functions:**
+   ```bash
+   npx supabase functions deploy booking-page
+   npx supabase functions deploy create-booking
+   npx supabase functions deploy manage-booking
+   npx supabase functions deploy get-available-slots   # now also supports rescheduling
+   ```
+   They're public (`verify_jwt = false` in `supabase/config.toml`). The confirmation email uses the existing `RESEND_API_KEY`, `REMINDER_FROM_EMAIL` and `APP_URL` secrets; without them, bookings still work and the email is skipped.
+3. **Set your change rules** in the app: Bookings → Cancellation & refund policy.
+4. **Plausible (optional):** add a custom-event goal named `Booking`.
+
+How it works:
+- Steps: choose a session (price, duration, location), a date (days without times are greyed out) and a time, enter details and accept the cancellation policy, review, and confirm. Times are shown in the customer's time zone (detected, and changeable) with the photographer's time beside each slot.
+- `create-booking` re-checks the chosen time against the same rules as the slot list, takes the price from the event type, and inserts through `create_booking()`. If someone else got the time first, the customer is sent back to the calendar with a message.
+- Bookings without an advance are confirmed immediately. Paying an advance online arrives with Stripe payouts (next phase); until then the option isn't shown and nothing is charged.
+- The confirmation page and email show the booking, the event instructions, the policy, **Add to calendar** (.ics file and Google Calendar), and a private **manage link** (`book.html#manage=<token>`; the token stays in the `#` part, so it isn't sent to the web host). There customers can re-read instructions, see payment status, see their other upcoming bookings with the same photographer, and reschedule or cancel if the photographer's rules allow.
+- A hidden form field catches simple bots. Rate limiting comes in the launch-checklist phase.
+
+### 10. Deploy (Vercel or Netlify)
 Both configs are included (`vercel.json`, `netlify.toml`). They run `node scripts/build.mjs`, which:
 - writes `js/config.js` from the `SUPABASE_URL`, `SUPABASE_ANON_KEY` and `PLAUSIBLE_DOMAIN` environment variables,
 - stamps the service worker cache name with the commit, so every deploy reaches users, and
@@ -207,11 +228,11 @@ The service worker pre-caches the app for offline use. When a new version is dep
 ```bash
 npm test             # unit tests: dates, due status, sync merging, the reminder scheduler and the send run (no install needed)
 npm i -D playwright && npx playwright install chromium
-npm run test:e2e     # browser tests: local-only mode, sign-in, upload, offline queue, update prompt, reminders, stop page, plans and upgrade, legal pages, beta list, analytics, SEO, CSV, PDF, Stripe Connect, payment links and booking setup
+npm run test:e2e     # browser tests: local-only mode, sign-in, upload, offline queue, update prompt, reminders, stop page, plans and upgrade, legal pages, beta list, analytics, SEO, CSV, PDF, Stripe Connect, payment links, booking setup and the public booking page
 ```
 The browser tests use an in-page fake of Supabase (`tests/e2e/fake-supabase.js`), so they need no real project.
 
-`js/schedule.js`, `js/slots.js`, `js/booking.js` and `js/markdown.js` are shared by the app and the Edge Functions. The functions' copies live in `supabase/functions/_shared/`; after editing an original, run `npm run sync-shared`. A unit test fails if any copy differs.
+`js/schedule.js`, `js/slots.js`, `js/booking.js`, `js/markdown.js` and `js/ics.js` are shared by the app and the Edge Functions. The functions' copies live in `supabase/functions/_shared/`; after editing an original, run `npm run sync-shared`. A unit test fails if any copy differs.
 
 ## Install as an app
 - **Android / Chrome / Edge:** click **Install** in the header, or use the browser menu and choose *Install app*.
@@ -228,6 +249,9 @@ js/booking.js          Booking rules: links, advances, hours, row mapping (share
 js/markdown.js         Safe Markdown subset for event instructions and policies
 js/booking-setup.js    Bookings tab: booking page, event types, hours, days off, policy
 js/slots.js            Open-slot calculation with time zones and daylight saving (shared with get-available-slots)
+js/book.js             Public booking page: steps, confirmation, manage (reschedule/cancel)
+js/ics.js              Calendar file (.ics) and Google Calendar link
+book.html              Public booking page
 js/cloud.js            Supabase auth and the offline sync queue
 js/app.js              App UI and local cache
 js/pwa.js              Service worker registration, update prompt, install button
@@ -241,7 +265,8 @@ sitemap.xml, robots.txt  Search engine files
 sw.js                  Offline cache
 supabase/migrations/   Database schema, Row Level Security, reminder claiming, hourly cron
 supabase/functions/    Edge Functions: send-reminders, stop-reminders, create-checkout, billing-portal, stripe-webhook,
-                       stripe-connect, payment-link, stripe-connect-webhook, get-available-slots
+                       stripe-connect, payment-link, stripe-connect-webhook, get-available-slots,
+                       booking-page, create-booking, manage-booking
 scripts/build.mjs      Deploy step: writes js/config.js, versions the service worker
 tests/                 Unit tests (node:test) and browser tests (Playwright)
 manifest.webmanifest   PWA manifest

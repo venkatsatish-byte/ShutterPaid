@@ -176,7 +176,10 @@
       min_notice_minutes: Number(p.minNoticeMinutes) || 0,
       max_days_ahead: Number(p.maxDaysAhead) || 90,
       max_per_day: p.maxPerDay ? Number(p.maxPerDay) : null,
-      cancellation_policy: p.cancellationPolicy || ''
+      cancellation_policy: p.cancellationPolicy || '',
+      allow_customer_cancel: p.allowCancel !== false,
+      allow_customer_reschedule: p.allowReschedule !== false,
+      change_cutoff_hours: p.changeCutoffHours == null || p.changeCutoffHours === '' ? 24 : Number(p.changeCutoffHours)
     };
   }
 
@@ -191,7 +194,11 @@
       minNoticeMinutes: r.min_notice_minutes,
       maxDaysAhead: r.max_days_ahead,
       maxPerDay: r.max_per_day == null ? '' : r.max_per_day,
-      cancellationPolicy: r.cancellation_policy || ''
+      cancellationPolicy: r.cancellation_policy || '',
+      // Customer changes from their booking link (defaults match the database).
+      allowCancel: r.allow_customer_cancel !== false,
+      allowReschedule: r.allow_customer_reschedule !== false,
+      changeCutoffHours: r.change_cutoff_hours == null ? 24 : r.change_cutoff_hours
     };
   }
 

@@ -183,6 +183,23 @@
             <div class="md-preview" hidden></div>
           </div>
           <p class="hint" style="margin:0">Formatting: **bold**, *italic*, - lists, [link text](https://…)</p>
+          <fieldset class="fieldset">
+            <legend>Changes from the client's booking link</legend>
+            <label class="check"><input type="checkbox" name="allowCancel"> Clients can cancel online</label>
+            <label class="check"><input type="checkbox" name="allowReschedule"> Clients can reschedule online</label>
+            <label>Until how long before the session?
+              <select name="changeCutoffHours">
+                <option value="0">Up to the start time</option>
+                <option value="2">2 hours before</option>
+                <option value="24">24 hours before</option>
+                <option value="48">48 hours before</option>
+                <option value="72">3 days before</option>
+                <option value="168">1 week before</option>
+                <option value="336">2 weeks before</option>
+              </select>
+            </label>
+            <p class="hint" style="margin:0">After that, clients see a message asking them to contact you.</p>
+          </fieldset>
           <div class="dialog-actions" style="justify-content:flex-start"><button class="btn btn-primary" type="submit">Save policy</button></div>
         </form>
       </div>

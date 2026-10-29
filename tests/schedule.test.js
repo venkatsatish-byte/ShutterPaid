@@ -11,7 +11,7 @@ const inv = (o) => Object.assign({ id: 'inv-1', clientName: 'Priya & Sam', clien
 const sched = S.DEFAULT_SCHEDULE;
 
 test('Edge Function copies of shared modules are identical to js/', () => {
-  for (const f of ['schedule', 'slots', 'booking', 'markdown']) {
+  for (const f of ['schedule', 'slots', 'booking', 'markdown', 'ics']) {
     const a = fs.readFileSync(path.join(__dirname, '../js/' + f + '.js'), 'utf8');
     const b = fs.readFileSync(path.join(__dirname, '../supabase/functions/_shared/' + f + '.js'), 'utf8');
     assert.equal(a, b, f + '.js differs: run npm run sync-shared');

@@ -21,3 +21,13 @@ verify_jwt = false
 # Public booking page: anyone may read open slots (no login).
 [functions.get-available-slots]
 verify_jwt = false
+
+# Public booking page functions (customers have no login; manage-booking uses the secret token).
+[functions.booking-page]
+verify_jwt = false
+
+[functions.create-booking]
+verify_jwt = false
+
+[functions.manage-booking]
+verify_jwt = false

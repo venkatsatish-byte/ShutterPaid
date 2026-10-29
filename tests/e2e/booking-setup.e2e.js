@@ -60,7 +60,8 @@ module.exports = async function run() {
   let d = await db(page);
   let mine = d.booking_profiles.find((p) => p.user_id.startsWith('1111'));
   ok(mine && mine.slug === 'venkat-photos' && mine.time_zone === 'America/New_York' && mine.accepting === false, 'profile saved to the account');
-  ok(/\/book\/venkat-photos$/.test(await page.textContent('#bkLink')), 'booking link shown: ' + await page.textContent('#bkLink'));
+  // Without the deploy build (no short-link redirect) the link uses book.html?p=.
+  ok(/\/book\.html\?p=venkat-photos$/.test(await page.textContent('#bkLink')), 'booking link shown: ' + await page.textContent('#bkLink'));
 
   // Photo upload.
   await page.setInputFiles('#bkPhotoInput', { name: 'me.png', mimeType: 'image/png', buffer: PNG });

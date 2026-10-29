@@ -39,3 +39,13 @@ test('Stripe parameters', () => {
   assert.deepEqual(l.metadata, { invoice_id: 'i1', user_id: 'u1' });
   assert.match(l.after_completion.hosted_confirmation.custom_message, /Rivera Photo has been notified/);
 });
+
+test('payment links charge the balance after an advance', () => {
+  const withAdvance = inv({ amount: 300, amount_paid: 75 });
+  assert.equal(P.balance(withAdvance), 225);
+  assert.equal(P.priceParams(withAdvance).unit_amount, 22500);
+  assert.equal(P.linkIsCurrent(Object.assign({}, withAdvance, { payment_url: 'u', payment_link_id: 'p', payment_link_amount: 225, payment_link_currency: 'USD' })), true);
+  // The advance changed (e.g. refunded): the old link no longer matches.
+  assert.equal(P.linkIsCurrent(Object.assign({}, withAdvance, { amount_paid: 50, payment_url: 'u', payment_link_id: 'p', payment_link_amount: 225, payment_link_currency: 'USD' })), false);
+  assert.equal(P.cannotLink(inv({ amount: 300, amount_paid: 300 }), connected), 'no-amount');
+});

@@ -255,7 +255,8 @@
     return '<li class="item">' +
       '<div><div class="item-title">' + esc(inv.clientName) + '</div><div class="item-meta">' + meta + '</div>' +
       (auto ? '<div class="item-auto ' + auto.cls + '">' + esc(auto.text) + '</div>' : '') + '</div>' +
-      '<div class="item-amount">' + BADGES[st] + '<div>' + money(inv.amount, inv.currency) + '</div></div>' +
+      '<div class="item-amount">' + BADGES[st] + '<div>' + money(inv.paid ? inv.amount : Core.balanceDue(inv), inv.currency) + '</div>' +
+        (!inv.paid && inv.amountPaid > 0 ? '<div class="item-paid-before">' + esc(money(inv.amountPaid, inv.currency)) + ' paid in advance</div>' : '') + '</div>' +
       '<div class="item-actions">' + actions.join('') + '</div>' +
       history +
       '</li>';
@@ -368,11 +369,13 @@
     const same = state.invoices.filter((i) => (i.currency || cur) === cur);
     const unpaid = same.filter((i) => !i.paid);
     const sum = (arr) => arr.reduce((t, i) => t + Number(i.amount || 0), 0);
+    // Outstanding amounts leave out anything already paid in advance.
+    const owed = (arr) => arr.reduce((t, i) => t + Core.balanceDue(i), 0);
     const monthPrefix = todayISO().slice(0, 7);
 
-    $('#statOutstanding').textContent = money(sum(unpaid), cur);
-    $('#statOverdue').textContent = money(sum(unpaid.filter((i) => daysUntil(i.dueDate) < 0)), cur);
-    $('#statSoon').textContent = money(sum(unpaid.filter((i) => {
+    $('#statOutstanding').textContent = money(owed(unpaid), cur);
+    $('#statOverdue').textContent = money(owed(unpaid.filter((i) => daysUntil(i.dueDate) < 0)), cur);
+    $('#statSoon').textContent = money(owed(unpaid.filter((i) => {
       const n = daysUntil(i.dueDate);
       return n >= 0 && n <= 7;
     })), cur);
@@ -808,7 +811,9 @@
       s.replyTo || (Cloud.user() && Cloud.user().email) || ''
     ].filter(Boolean).join('\n');
     const issued = String(inv.createdAt || '').slice(0, 10) || todayISO();
-    const kind = inv.shootType && inv.shootType !== 'Other' ? inv.shootType + ' photography' : 'Photography';
+    // Booking invoices use the event type's own name ("Portrait session"); others say "Wedding photography".
+    const kind = inv.bookingId && inv.shootType ? inv.shootType
+      : inv.shootType && inv.shootType !== 'Other' ? inv.shootType + ' photography' : 'Photography';
     const link = inv.paymentUrl || s.paymentLink;
     const row = (label, value) => value ? '<dt>' + esc(label) + '</dt><dd>' + esc(value) + '</dd>' : '';
     return '<article class="invoice-sheet">' +
@@ -825,7 +830,10 @@
       '<table><thead><tr><th>Description</th><th class="num">Amount</th></tr></thead><tbody>' +
         '<tr><td>' + esc(kind) + (inv.shootDate ? '<br><span style="color:#6b6c84">Session on ' + esc(prettyDate(inv.shootDate)) + '</span>' : '') + '</td>' +
         '<td class="num">' + esc(money(inv.amount, inv.currency)) + '</td></tr>' +
-        '<tr class="inv-total"><td>' + (inv.paid ? 'Total paid' : 'Total due') + '</td><td class="num">' + esc(money(inv.amount, inv.currency)) + '</td></tr>' +
+        (inv.amountPaid > 0 && !inv.paid
+          ? '<tr><td>Paid in advance</td><td class="num">−' + esc(money(inv.amountPaid, inv.currency)) + '</td></tr>' +
+            '<tr class="inv-total"><td>Balance due</td><td class="num">' + esc(money(Core.balanceDue(inv), inv.currency)) + '</td></tr>'
+          : '<tr class="inv-total"><td>' + (inv.paid ? 'Total paid' : 'Total due') + '</td><td class="num">' + esc(money(inv.amount, inv.currency)) + '</td></tr>') +
       '</tbody></table>' +
       (!inv.paid && link ? '<div class="inv-pay"><div class="inv-label">Pay online</div><a href="' + esc(link) + '">' + esc(link) + '</a></div>' : '') +
       (inv.notes ? '<div class="inv-notes"><div class="inv-label">Notes</div>' + esc(inv.notes) + '</div>' : '') +

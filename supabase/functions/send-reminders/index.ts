@@ -43,7 +43,7 @@ Deno.serve(async (req) => {
           for (let from = 0; ; from += PAGE) {
             const { data, error } = await db
               .from('invoices')
-              .select('id,user_id,client_name,client_email,shoot_type,number,amount,currency,due_date,paid,auto_remind,reminder_schedule,reminders_stopped_at,unsubscribe_token,payment_url')
+              .select('id,user_id,client_name,client_email,shoot_type,number,amount,currency,due_date,paid,auto_remind,reminder_schedule,reminders_stopped_at,unsubscribe_token,payment_url,amount_paid')
               .eq('auto_remind', true).eq('paid', false).is('reminders_stopped_at', null).neq('client_email', '')
               .order('id').range(from, from + PAGE - 1);
             if (error) throw error;
@@ -67,6 +67,7 @@ Deno.serve(async (req) => {
                 paid: i.paid, autoRemind: i.auto_remind, reminderSchedule: i.reminder_schedule,
                 remindersStoppedAt: i.reminders_stopped_at,
                 paymentUrl: i.payment_url,
+                amountPaid: Number(i.amount_paid || 0),
                 connected: !!(p.stripe_connect_account_id && p.connect_charges_enabled),
               },
               profile: {

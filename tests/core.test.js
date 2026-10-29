@@ -204,3 +204,13 @@ test('toCSV lists invoices by due date with status and reminder counts', () => {
   assert.match(lines[1], /^INV-1,Priya & Sam,.*,100\.00,USD,Paid,2026-03-05,Stripe,1,2026-02-27,Off,https:\/\/buy\.stripe\.com\/x,/);
   assert.match(lines[2], /^INV-2,"Late, Client",.*,99\.50,EUR,Open,,,0,,Off,,/);
 });
+
+test('invoices with an advance: balance, CSV columns', () => {
+  const i = inv({ amount: 300, amountPaid: 75, number: 'BK-1', currency: 'USD' });
+  assert.equal(C.balanceDue(i), 225);
+  assert.equal(C.balanceDue(inv({ amount: 100, amountPaid: 150 })), 0);
+  assert.equal(C.balanceDue(inv({ amount: 99.99 })), 99.99);
+  const line = C.toCSV([i], 3, TODAY).split('\r\n')[1];
+  assert.match(line, /,300\.00,75\.00,225\.00,USD,/);
+  assert.equal(C.rowToInvoice({ id: 'x', amount: '300', amount_paid: '75.00', booking_id: 'b1', due_date: TODAY }, []).amountPaid, 75);
+});

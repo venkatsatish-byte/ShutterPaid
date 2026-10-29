@@ -331,6 +331,7 @@ section { padding: 72px 0; }
 .item:first-child { border-top: none; }
 .item-title { font-weight: 700; }
 .item-meta { color: var(--muted); font-size: 0.85rem; }
+.item-paid-before { font-size: 0.75rem; font-weight: 600; color: var(--muted); }
 .item-amount { font-weight: 800; text-align: right; }
 .item-actions { grid-column: 1 / -1; display: flex; gap: 8px; flex-wrap: wrap; }
 

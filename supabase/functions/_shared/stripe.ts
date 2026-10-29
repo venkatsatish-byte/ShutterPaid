@@ -50,7 +50,7 @@ export async function ensureCustomer(stripe: Stripe, admin: SupabaseClient, user
 const PayLinks = (globalThis as any).SPPayLinks;
 
 const INVOICE_LINK_COLUMNS =
-  'id,user_id,amount,currency,shoot_type,number,paid,payment_url,payment_link_id,payment_link_amount,payment_link_currency';
+  'id,user_id,amount,amount_paid,currency,shoot_type,number,paid,payment_url,payment_link_id,payment_link_amount,payment_link_currency';
 
 // Returns the invoice's current payment link, creating one (and retiring an outdated one) if needed.
 // { url: null, reason } when no link can be made, e.g. Stripe isn't connected.
@@ -66,7 +66,7 @@ export async function ensurePaymentLink(stripe: Stripe, admin: SupabaseClient, i
 
   const opts = { stripeAccount: profile.stripe_connect_account_id as string };
   // Same invoice, amount and previous link => same key, so concurrent callers get the same link.
-  const key = `${inv.id}-${PayLinks.minorUnits(inv.amount, inv.currency)}-${inv.currency}-${inv.payment_link_id ?? 'first'}`;
+  const key = `${inv.id}-${PayLinks.minorUnits(PayLinks.balance(inv), inv.currency)}-${inv.currency}-${inv.payment_link_id ?? 'first'}`;
   const price = await stripe.prices.create(PayLinks.priceParams(inv), { ...opts, idempotencyKey: `price-${key}` });
   const link = await stripe.paymentLinks.create(
     PayLinks.linkParams(inv, price.id, profile.business_name || profile.owner_name),
@@ -78,7 +78,7 @@ export async function ensurePaymentLink(stripe: Stripe, admin: SupabaseClient, i
   const { error: uErr } = await admin.from('invoices').update({
     payment_url: link.url,
     payment_link_id: link.id,
-    payment_link_amount: inv.amount,
+    payment_link_amount: PayLinks.balance(inv),
     payment_link_currency: inv.currency,
   }).eq('id', inv.id);
   if (uErr) throw uErr;

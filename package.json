@@ -6,6 +6,6 @@
     "build": "node scripts/build.mjs",
     "test": "node --test tests/*.test.js",
     "test:e2e": "node tests/e2e/run.js",
-    "sync-shared": "cp js/schedule.js supabase/functions/_shared/schedule.js"
+    "sync-shared": "for f in schedule slots booking markdown; do cp js/$f.js supabase/functions/_shared/$f.js; done"
   }
 }

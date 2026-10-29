@@ -196,6 +196,8 @@
       remindersStoppedAt: row.reminders_stopped_at || '',
       paymentUrl: row.payment_url || '',
       paidVia: row.paid_via || '',
+      bookingId: row.booking_id || '',
+      amountPaid: Number(row.amount_paid || 0),
       reminders: reminders || []
     };
   }
@@ -225,7 +227,7 @@
 
   // Explicit column lists: the browser isn't allowed to read server-only columns.
   const INVOICE_COLUMNS = 'id,user_id,client_name,client_email,shoot_type,number,amount,currency,shoot_date,due_date,' +
-    'notes,paid,paid_date,created_at,updated_at,auto_remind,reminder_schedule,reminders_stopped_at,payment_url,paid_via';
+    'notes,paid,paid_date,created_at,updated_at,auto_remind,reminder_schedule,reminders_stopped_at,payment_url,paid_via,booking_id,amount_paid';
   const REMINDER_COLUMNS = 'id,invoice_id,sent_on,sent_at,tone,channel,status,scheduled_for,step_offset,error';
 
   const SETTINGS_COLUMNS = {
@@ -376,6 +378,11 @@
     return Date.parse(plan.periodEnd) > (now || Date.now()) - 3 * DAY;
   }
 
+  // What the client still owes: the amount minus anything paid in advance (e.g. a booking deposit).
+  function balanceDue(inv) {
+    return Math.max(0, Math.round((Number(inv.amount || 0) - (Number(inv.amountPaid) || 0)) * 100) / 100);
+  }
+
   function activeCount(invoices) {
     return invoices.filter((i) => !i.paid).length;
   }
@@ -405,13 +412,13 @@
   const CSV_STATUS = { paid: 'Paid', overdue: 'Overdue', soon: 'Due soon', open: 'Open' };
 
   function toCSV(invoices, soonDays, today) {
-    const header = ['Invoice #', 'Client', 'Client email', 'Shoot type', 'Shoot date', 'Due date', 'Amount', 'Currency',
+    const header = ['Invoice #', 'Client', 'Client email', 'Shoot type', 'Shoot date', 'Due date', 'Amount', 'Paid in advance', 'Balance', 'Currency',
       'Status', 'Paid date', 'Paid via', 'Reminders sent', 'Last reminder', 'Auto reminders', 'Payment link', 'Notes'];
     const rows = invoices.slice().sort((a, b) => String(a.dueDate).localeCompare(String(b.dueDate))).map((inv) => {
       const sent = (inv.reminders || []).filter(isDelivered);
       return [
         inv.number, inv.clientName, inv.clientEmail, inv.shootType, inv.shootDate, inv.dueDate,
-        Number(inv.amount || 0).toFixed(2), inv.currency,
+        Number(inv.amount || 0).toFixed(2), Number(inv.amountPaid || 0).toFixed(2), balanceDue(inv).toFixed(2), inv.currency,
         CSV_STATUS[statusOf(inv, soonDays, today)], inv.paid ? inv.paidDate : '', inv.paid ? (inv.paidVia === 'stripe' ? 'Stripe' : 'Manual') : '',
         sent.length, sent.length ? sent[sent.length - 1].date : '', inv.autoRemind ? 'On' : 'Off', inv.paymentUrl || '', inv.notes
       ];
@@ -427,6 +434,6 @@
     invoiceToRow, rowToInvoice, reminderToRow, rowToReminder, settingsToRow, rowToSettings, assemble,
     INVOICE_COLUMNS, REMINDER_COLUMNS,
     coalesceOps, pendingKeys, mergeRemote, mergeRows, isTransientError, planLimitError,
-    FREE_ACTIVE_LIMIT, planFromProfile, isPro, activeCount, fitToPlan, csvCell, toCSV
+    FREE_ACTIVE_LIMIT, planFromProfile, isPro, activeCount, fitToPlan, csvCell, toCSV, balanceDue
   };
 });

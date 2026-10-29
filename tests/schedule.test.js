@@ -10,10 +10,12 @@ const DUE = '2026-03-20';
 const inv = (o) => Object.assign({ id: 'inv-1', clientName: 'Priya & Sam', clientEmail: 'priya@example.com', shootType: 'Wedding', number: 'INV-1001', amount: 2400, currency: 'USD', dueDate: DUE, paid: false, autoRemind: true }, o);
 const sched = S.DEFAULT_SCHEDULE;
 
-test('the Edge Function copy of schedule.js is identical to js/schedule.js', () => {
-  const a = fs.readFileSync(path.join(__dirname, '../js/schedule.js'), 'utf8');
-  const b = fs.readFileSync(path.join(__dirname, '../supabase/functions/_shared/schedule.js'), 'utf8');
-  assert.equal(a, b, 'run: npm run sync-shared');
+test('Edge Function copies of shared modules are identical to js/', () => {
+  for (const f of ['schedule', 'slots', 'booking', 'markdown']) {
+    const a = fs.readFileSync(path.join(__dirname, '../js/' + f + '.js'), 'utf8');
+    const b = fs.readFileSync(path.join(__dirname, '../supabase/functions/_shared/' + f + '.js'), 'utf8');
+    assert.equal(a, b, f + '.js differs: run npm run sync-shared');
+  }
 });
 
 test('normalizeSchedule cleans user input', () => {
@@ -232,4 +234,12 @@ test('run adds the Stripe payment link, and still sends if creating it fails', a
   assert.equal(sent.length, 2);
   assert.match(sent[0].text, /buy\.stripe\.com\/a/);
   assert.match(sent[1].text, /paypal\.me\/alex/);
+});
+
+test('reminders ask only for the balance after an advance', () => {
+  const s = { ownerName: 'Alex', businessName: 'Rivera' };
+  const r = S.buildReminder(inv({ amount: 300, amountPaid: 75 }), s, 'firm', '2026-03-27', 'en-US');
+  assert.match(r.subject, /for \$225 \(the balance after your advance of \$75\)$/);
+  assert.match(r.body, /The balance of \$225 \(the balance after your advance of \$75\)/);
+  assert.match(S.buildReminder(inv({ amount: 300 }), s, 'firm', '2026-03-27', 'en-US').subject, /for \$300$/);
 });

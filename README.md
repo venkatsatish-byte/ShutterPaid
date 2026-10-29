@@ -155,7 +155,27 @@ How it fits together:
 - Event instructions and policies use a small Markdown subset (`js/markdown.js`): **bold**, *italic*, lists and `http(s)`/`mailto` links. Everything is escaped, so text can never inject HTML or scripts into client pages or emails.
 - Customers never read these tables directly; the public booking page will use Edge Functions (next phase).
 
-### 8. Deploy (Vercel or Netlify)
+### 8. Bookings: database and open slots
+1. **Apply the migrations** `20261102000000_bookings.sql` and `20261102000100_release_booking_holds.sql` (`npx supabase db push`). They create:
+   - `bookings`: customer details, `start_at`/`end_at` in UTC, status (`pending_payment`, `confirmed`, `cancelled`, `completed`, `no_show`), the advance chosen and its server-computed amount, a 10-minute hold (`expires_at`) while the customer is in Stripe Checkout, and a secret `manage_token` for the customer's "manage my booking" link.
+   - `payments`: one row per advance, filled in by Stripe webhooks (a later phase).
+   - **Double-booking protection in the database:** an exclusion constraint (`btree_gist`) stops two active bookings (`pending_payment` or `confirmed`) of the same photographer from overlapping, buffers included. Even if two customers press "Book" at the same moment, only one succeeds.
+   - A trigger that turns each **confirmed booking into an invoice** (`BK-…`, due on the event day) and keeps its **paid in advance** amount in step with paid and refunded advances. Reminders, PDFs, CSV, totals and payment links then use the remaining balance. If the invoice can't be created (for example, the Free plan's limit), the booking is still confirmed.
+   - A `pg_cron` job, every minute, that releases holds whose 10 minutes ran out.
+2. **Deploy the slots function:** `npx supabase functions deploy get-available-slots` (public; `verify_jwt = false` in `supabase/config.toml`).
+3. **Try it** (after setting up a booking page and switching bookings on):
+   ```bash
+   curl 'https://<project-ref>.supabase.co/functions/v1/get-available-slots?slug=<your-link>&event_type_id=<event type id>&from=2026-11-02&to=2026-11-15&tz=Europe/London'
+   ```
+   It returns each day's open start times in the customer's time zone (`time`) and the photographer's (`photographerTime`).
+
+How slots are calculated (`js/slots.js`, shared with the function):
+- Working hours are wall-clock times in the photographer's time zone, converted to real instants for each date with that zone's rules, so daylight-saving changes are handled: times skipped by the clock change are never offered, repeated times are offered once.
+- A start time is offered if the session fits inside the working hours, the session plus its buffers doesn't touch another active booking (plus that booking's buffers), it's after the minimum notice, on or before the last bookable day, not on a day off, and the day hasn't reached its maximum bookings.
+- Holds whose time ran out are ignored straight away, even before the cleanup job runs.
+- Customers never query the tables; the function reads them with the service role and returns only what the booking page needs. Photographers can read and update their own bookings, but not prices, advances, holds, invoice links, payments or customers' manage tokens.
+
+### 9. Deploy (Vercel or Netlify)
 Both configs are included (`vercel.json`, `netlify.toml`). They run `node scripts/build.mjs`, which:
 - writes `js/config.js` from the `SUPABASE_URL`, `SUPABASE_ANON_KEY` and `PLAUSIBLE_DOMAIN` environment variables,
 - stamps the service worker cache name with the commit, so every deploy reaches users, and
@@ -191,7 +211,7 @@ npm run test:e2e     # browser tests: local-only mode, sign-in, upload, offline 
 ```
 The browser tests use an in-page fake of Supabase (`tests/e2e/fake-supabase.js`), so they need no real project.
 
-`js/schedule.js` (schedule rules and email copy) is shared by the app and the Edge Function. The function's copy lives in `supabase/functions/_shared/schedule.js`; after editing the original, run `npm run sync-shared`. A unit test fails if the two differ.
+`js/schedule.js`, `js/slots.js`, `js/booking.js` and `js/markdown.js` are shared by the app and the Edge Functions. The functions' copies live in `supabase/functions/_shared/`; after editing an original, run `npm run sync-shared`. A unit test fails if any copy differs.
 
 ## Install as an app
 - **Android / Chrome / Edge:** click **Install** in the header, or use the browser menu and choose *Install app*.
@@ -207,6 +227,7 @@ js/schedule.js         Reminder schedule rules and email copy (shared with the E
 js/booking.js          Booking rules: links, advances, hours, row mapping (shared with later booking pages/functions)
 js/markdown.js         Safe Markdown subset for event instructions and policies
 js/booking-setup.js    Bookings tab: booking page, event types, hours, days off, policy
+js/slots.js            Open-slot calculation with time zones and daylight saving (shared with get-available-slots)
 js/cloud.js            Supabase auth and the offline sync queue
 js/app.js              App UI and local cache
 js/pwa.js              Service worker registration, update prompt, install button
@@ -220,7 +241,7 @@ sitemap.xml, robots.txt  Search engine files
 sw.js                  Offline cache
 supabase/migrations/   Database schema, Row Level Security, reminder claiming, hourly cron
 supabase/functions/    Edge Functions: send-reminders, stop-reminders, create-checkout, billing-portal, stripe-webhook,
-                       stripe-connect, payment-link, stripe-connect-webhook
+                       stripe-connect, payment-link, stripe-connect-webhook, get-available-slots
 scripts/build.mjs      Deploy step: writes js/config.js, versions the service worker
 tests/                 Unit tests (node:test) and browser tests (Playwright)
 manifest.webmanifest   PWA manifest

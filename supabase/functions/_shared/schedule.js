@@ -150,7 +150,11 @@
   // Subject and plain-text body of a reminder, in one of three tones.
   function buildReminder(inv, s, tone, today, locale) {
     const first = (inv.clientName || '').split(/\s|&/)[0] || 'there';
-    const amount = formatMoney(inv.amount, inv.currency || s.currency, locale);
+    // With an advance already paid (e.g. a booking deposit), reminders ask only for the balance.
+    const paidBefore = Math.max(0, Number(inv.amountPaid) || 0);
+    const balance = Math.max(0, Math.round((Number(inv.amount || 0) - paidBefore) * 100) / 100);
+    const amount = formatMoney(balance, inv.currency || s.currency, locale)
+      + (paidBefore > 0 ? ' (the balance after your advance of ' + formatMoney(paidBefore, inv.currency || s.currency, locale) + ')' : '');
     const ref = inv.number ? ' (' + inv.number + ')' : '';
     const shoot = inv.shootType ? inv.shootType.toLowerCase() + ' session' : 'session';
     const due = formatDate(inv.dueDate, locale);
